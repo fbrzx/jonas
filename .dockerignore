@@ -1,0 +1,14 @@
+.git/
+node_modules/
+dist/
+build/
+.turbo/
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+data/
+*.md
+!README.md

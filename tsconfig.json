@@ -1,0 +1,14 @@
+{
+  "extends": "./packages/config/tsconfig/base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "services/agent" },
+    { "path": "services/gateway" },
+    { "path": "apps/dashboard" },
+    { "path": "packages/acp-bridge" }
+  ]
+}
