@@ -154,6 +154,28 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  services/telegram-bot:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^1.14.0
+        version: 1.19.9(hono@4.11.9)
+      '@jonas/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      hono:
+        specifier: ^4.7.8
+        version: 4.11.9
+    devDependencies:
+      '@jonas/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(postcss@8.5.6)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
 packages:
 
   '@anthropic-ai/claude-code@2.1.41':

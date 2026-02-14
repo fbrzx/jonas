@@ -1,4 +1,4 @@
-export type ChannelType = 'gateway' | 'api' | 'scheduler' | 'dashboard';
+export type ChannelType = 'gateway' | 'api' | 'scheduler' | 'dashboard' | 'telegram';
 
 export interface Channel {
   type: ChannelType;

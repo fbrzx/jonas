@@ -35,6 +35,14 @@ This document lists all environment variables used by the Jonas agent.
 - `DASHBOARD_PORT` - Dashboard HTTP port (default: `3000`)
 - `DASHBOARD_AUTH_TOKEN` - Dashboard authentication token (required)
 
+### Telegram Bot
+- `TELEGRAM_BOT_TOKEN` - Telegram bot token from @BotFather (required)
+- `TELEGRAM_MODE` - Bot mode: `webhook` or `polling` (default: `webhook`)
+- `TELEGRAM_WEBHOOK_URL` - Public webhook URL (e.g., `https://your-domain.com/webhook`) - for webhook mode
+- `TELEGRAM_WEBHOOK_SECRET` - Optional secret token for webhook verification - for webhook mode
+- `TELEGRAM_POLL_INTERVAL` - Polling interval in ms (default: `1000`) - for polling mode
+- `TELEGRAM_BOT_PORT` - Webhook server port (default: `3002`) - for webhook mode
+
 ### General
 - `AGENT_PORT` - Agent API port (default: `3001`)
 - `VAULT_PATH` - Path to encrypted vault storage (default: `/data/vault`)
