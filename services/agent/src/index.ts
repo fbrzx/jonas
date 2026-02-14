@@ -3,6 +3,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLogger } from '@jonas/shared/utils';
 import { AgentCore } from './agent/core.js';
+import { ProviderFactory } from './agent/providers/factory.js';
 import { MemoryClient } from './memory/client.js';
 import { EmbeddingClient } from './memory/embeddings.js';
 import { MemoryRetriever } from './memory/retriever.js';
@@ -64,8 +65,14 @@ async function main() {
   const oauthHandler = new OAuthHandler({ providerStore: oauthProviderStore, skillRegistry });
   log.info('OAuth provider store loaded');
 
+  // Load model provider configuration and create provider
+  const modelConfigPath = '/data/model-config.json';
+  const providerConfig = await ProviderFactory.loadConfig(modelConfigPath);
+  const provider = ProviderFactory.create(providerConfig, claudeBin, mcpConfigPath);
+  log.info({ provider: provider.getName() }, 'Model provider initialized');
+
   // Initialize agent core
-  const agent = new AgentCore({ retriever, extractor, claudeBin, mcpConfigPath, skillRegistry });
+  const agent = new AgentCore({ retriever, extractor, provider, mcpConfigPath, skillRegistry });
 
   // Initialize task scheduler
   const scheduler = new TaskScheduler({

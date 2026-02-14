@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createLogger, createId, isoNow } from '@jonas/shared/utils';
 import type { Message, Conversation, Channel, AuditEntry } from '@jonas/shared/types';
@@ -7,30 +6,23 @@ import { assembleSystemPrompt } from './prompt.js';
 import type { MemoryRetriever } from '../memory/retriever.js';
 import type { MemoryExtractor } from '../memory/extractor.js';
 import type { SkillRegistry } from '../skills/registry.js';
+import type { ModelProvider } from './providers/base.js';
 
 const log = createLogger('agent-core');
 
 export interface AgentCoreOptions {
   retriever: MemoryRetriever;
   extractor: MemoryExtractor;
-  claudeBin: string;
+  provider: ModelProvider;
   mcpConfigPath: string;
   skillRegistry?: SkillRegistry;
-}
-
-interface CliResult {
-  type: string;
-  subtype: string;
-  is_error: boolean;
-  result: string;
-  duration_ms: number;
 }
 
 export class AgentCore {
   private sessions = new SessionManager();
   private retriever: MemoryRetriever;
   private extractor: MemoryExtractor;
-  private claudeBin: string;
+  private provider: ModelProvider;
   private mcpConfigPath: string;
   private skillRegistry?: SkillRegistry;
   private auditLog: AuditEntry[] = [];
@@ -40,7 +32,7 @@ export class AgentCore {
   constructor(opts: AgentCoreOptions) {
     this.retriever = opts.retriever;
     this.extractor = opts.extractor;
-    this.claudeBin = opts.claudeBin;
+    this.provider = opts.provider;
     this.mcpConfigPath = opts.mcpConfigPath;
     this.skillRegistry = opts.skillRegistry;
   }
@@ -55,6 +47,10 @@ export class AgentCore {
 
   get activeConversationCount(): number {
     return this.sessions.count;
+  }
+
+  getProviderName(): string {
+    return this.provider.getName();
   }
 
   async chat(
@@ -94,9 +90,9 @@ export class AgentCore {
     let fullResponse = '';
 
     try {
-      log.info({ channel: channel.type, sessionKey: key, historyLen: session.messages.length }, 'Sending query to Claude CLI');
+      log.info({ channel: channel.type, sessionKey: key, historyLen: session.messages.length }, 'Sending query to model provider');
 
-      fullResponse = await this.spawnClaude({
+      fullResponse = await this.provider.query({
         prompt,
         systemPrompt,
         model,
@@ -110,7 +106,7 @@ export class AgentCore {
         log.info({ sessionKey: key }, 'Query aborted');
         fullResponse = '[Query aborted]';
       } else {
-        log.error(err, 'Claude query failed');
+        log.error(err, 'Model query failed');
         throw err;
       }
     } finally {
@@ -161,74 +157,6 @@ export class AgentCore {
     lines.push(`User: ${currentMessage}`);
 
     return `<conversation_history>\n${lines.join('\n\n')}\n</conversation_history>\n\nRespond to the latest User message above. Use the conversation history for context.`;
-  }
-
-  private spawnClaude(opts: {
-    prompt: string;
-    systemPrompt: string;
-    model: string;
-    signal: AbortSignal;
-  }): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const args = [
-        '--print',
-        '--output-format', 'json',
-        '--model', opts.model,
-        '--max-turns', '10',
-        '--system-prompt', opts.systemPrompt,
-        '--permission-mode', 'bypassPermissions',
-        '--mcp-config', this.mcpConfigPath,
-        '--', opts.prompt,
-      ];
-
-      const child = spawn(this.claudeBin, args, {
-        env: { ...process.env, CLAUDECODE: '' },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      child.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
-      child.stderr.on('data', (data: Buffer) => {
-        const line = data.toString().trim();
-        if (line) log.warn({ stderr: line }, 'Claude CLI stderr');
-        stderr += line;
-      });
-
-      const onAbort = () => {
-        child.kill('SIGTERM');
-        reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
-      };
-      opts.signal.addEventListener('abort', onAbort, { once: true });
-
-      child.on('close', (code) => {
-        opts.signal.removeEventListener('abort', onAbort);
-        log.info({ code, stdoutLen: stdout.length }, 'Claude CLI process exited');
-
-        try {
-          const result: CliResult = JSON.parse(stdout);
-          if (result.is_error) {
-            log.error({ result: result.result }, 'Claude CLI returned error');
-            reject(new Error(result.result));
-            return;
-          }
-          log.info({ duration: result.duration_ms }, 'Claude CLI response received');
-          resolve(result.result);
-        } catch {
-          if (code !== 0) {
-            reject(new Error(`Claude CLI exited with code ${code}: ${stderr || stdout}`));
-          } else {
-            resolve(stdout.trim());
-          }
-        }
-      });
-
-      child.on('error', (err) => {
-        opts.signal.removeEventListener('abort', onAbort);
-        reject(err);
-      });
-    });
   }
 
   /** Rebuild MCP config to include dynamically enabled skill tool servers. */

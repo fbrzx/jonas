@@ -14,6 +14,10 @@ services:
       - VAULT_PATH=/data/vault
       - SKILLS_ENCRYPTION_KEY=${SKILLS_ENCRYPTION_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Model provider configuration
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-claude}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:latest}
     volumes:
       - ./.volumes/agent-data:/data
     networks:
@@ -22,6 +26,9 @@ services:
     depends_on:
       qdrant:
         condition: service_healthy
+      # Uncomment to require Ollama service
+      # ollama:
+      #   condition: service_started
 
   gateway:
     build:
@@ -73,6 +80,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Ollama - Local LLM inference (optional)
+  # Uncomment this service to run local models
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./.volumes/ollama:/root/.ollama
+  #   networks:
+  #     - internal
+  #   healthcheck:
+  #     test: ["CMD", "ollama", "list"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+  #   # Uncomment for GPU support (NVIDIA)
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: all
+  #   #           capabilities: [gpu]
 
 networks:
   internal:

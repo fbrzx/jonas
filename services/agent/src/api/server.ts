@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { writeFile } from 'node:fs/promises';
 import { createLogger } from '@jonas/shared/utils';
 import type { AgentCore } from '../agent/core.js';
 import type { MemoryClient } from '../memory/client.js';
@@ -8,6 +9,8 @@ import type { TaskScheduler } from '../tasks/scheduler.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { OAuthProviderStore } from '../oauth/provider-store.js';
 import type { OAuthHandler } from '../oauth/handler.js';
+import { ProviderFactory } from '../agent/providers/factory.js';
+import type { ProviderConfig } from '../agent/providers/base.js';
 
 const log = createLogger('api');
 
@@ -36,7 +39,7 @@ export function createApiServer(deps: ApiDeps) {
 
     return c.json({
       uptime: deps.agent.uptime,
-      model: process.env.AGENT_DEFAULT_MODEL ?? 'claude-sonnet-4-5-20250929',
+      model: deps.agent.getProviderName(),
       memoryStats: { episodic, semantic, procedural },
       activeConversations: deps.agent.activeConversationCount,
       skillCount: deps.skillRegistry?.list().length ?? 0,
@@ -45,6 +48,77 @@ export function createApiServer(deps: ApiDeps) {
         gateway: true,
       },
     });
+  });
+
+  // --- Model configuration endpoints ---
+
+  app.get('/api/model/config', async (c) => {
+    try {
+      const config = await ProviderFactory.loadConfig('/data/model-config.json');
+      return c.json(config);
+    } catch (err) {
+      log.error(err, 'Failed to load model config');
+      return c.json({ error: 'Failed to load model config' }, 500);
+    }
+  });
+
+  app.put('/api/model/config', async (c) => {
+    try {
+      const config = await c.req.json<ProviderConfig>();
+
+      // Validate provider
+      if (!['claude', 'ollama'].includes(config.provider)) {
+        return c.json({ error: 'Invalid provider. Must be "claude" or "ollama"' }, 400);
+      }
+
+      // Validate provider-specific config
+      if (config.provider === 'ollama') {
+        if (!config.ollama?.baseUrl || !config.ollama?.model) {
+          return c.json({ error: 'Ollama config requires baseUrl and model' }, 400);
+        }
+      }
+
+      if (config.provider === 'claude') {
+        if (!config.claude?.model) {
+          return c.json({ error: 'Claude config requires model' }, 400);
+        }
+      }
+
+      // Write config to file
+      await writeFile('/data/model-config.json', JSON.stringify(config, null, 2));
+      log.info({ provider: config.provider }, 'Model config updated');
+
+      return c.json({ success: true, config });
+    } catch (err) {
+      log.error(err, 'Failed to update model config');
+      return c.json({ error: 'Failed to update model config' }, 500);
+    }
+  });
+
+  app.get('/api/model/ollama/list', async (c) => {
+    try {
+      const baseUrl = c.req.query('baseUrl') ?? process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
+
+      const response = await fetch(`${baseUrl}/api/tags`);
+      if (!response.ok) {
+        return c.json({ error: `Ollama API error (${response.status})` }, response.status);
+      }
+
+      const data = await response.json() as { models: Array<{ name: string; size: number; modified_at: string }> };
+
+      return c.json({
+        baseUrl,
+        models: data.models.map((m) => ({
+          name: m.name,
+          size: m.size,
+          modifiedAt: m.modified_at,
+        })),
+      });
+    } catch (err) {
+      log.error(err, 'Failed to list Ollama models');
+      const msg = err instanceof Error ? err.message : 'Failed to list Ollama models';
+      return c.json({ error: msg }, 500);
+    }
   });
 
   // Chat endpoint (used by gateway)

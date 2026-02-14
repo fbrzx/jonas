@@ -1,6 +1,6 @@
 # Jonas — Personal AI Assistant
 
-Always-on personal AI assistant running in Docker. Uses Claude Pro via the Agent SDK, stores memories in Qdrant, communicates via Matrix/Element and local Claude Code CLI.
+Always-on personal AI assistant running in Docker. Supports both Claude (via CLI) and Ollama (local models), stores memories in Qdrant, uses configurable skills and performs scheduled tasks.
 
 ## Quick Start
 
@@ -15,6 +15,33 @@ cp env.example .env
 # Start everything
 docker compose up -d
 ```
+
+## Model Providers
+
+Jonas supports two model providers:
+
+### Claude (default)
+Uses Claude Pro via OAuth token and the Claude Code CLI:
+```bash
+MODEL_PROVIDER=claude
+AGENT_DEFAULT_MODEL=claude-sonnet-4-5-20250929
+```
+
+### Ollama (local models)
+Run local models like Qwen, Llama, etc:
+```bash
+MODEL_PROVIDER=ollama
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_MODEL=qwen2.5-coder:latest
+
+# Start Ollama service
+docker compose up -d ollama
+
+# Pull a model
+docker compose exec ollama ollama pull qwen2.5-coder:latest
+```
+
+You can also configure the model provider via the dashboard UI at runtime. See `.claude/docs/environment-variables.md` for all configuration options.
 
 ## Access
 

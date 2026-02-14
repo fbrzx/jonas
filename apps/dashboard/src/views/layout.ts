@@ -3,6 +3,7 @@ const NAV_ITEMS = [
   { href: '/chat', label: 'Chat' },
   { href: '/memory', label: 'Memory' },
   { href: '/skills', label: 'Skills' },
+  { href: '/model', label: 'Model' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/audit', label: 'Audit' },
 ];
@@ -64,12 +65,17 @@ export function layout(title: string, content: string): string {
     .badge--red { background: #f8514933; color: #f85149; }
     h1 { font-size: 1.25rem; margin-bottom: 1rem; color: #f0f6fc; }
     h2 { font-size: 1rem; margin-bottom: 0.75rem; color: #f0f6fc; }
-    input[type="text"], input[type="search"] {
+    input[type="text"], input[type="search"], input[type="radio"] {
       background: #0d1117; border: 1px solid #30363d;
       color: #c9d1d9; padding: 0.5rem 0.75rem; border-radius: 6px;
-      font-family: inherit; font-size: 0.875rem; width: 100%; max-width: 400px;
+      font-family: inherit; font-size: 0.875rem;
     }
+    input[type="text"], input[type="search"] { width: 100%; max-width: 400px; }
+    input[type="radio"] { width: auto; padding: 0; margin-right: 0.5rem; accent-color: #58a6ff; }
     input:focus { outline: none; border-color: #58a6ff; }
+    .form-group { margin-bottom: 1.5rem; }
+    .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+    .form-group small { display: block; margin-top: 0.25rem; color: #8b949e; font-size: 0.8rem; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; }
     .meta { color: #8b949e; font-size: 0.75rem; }
     .score { color: #d29922; }
@@ -80,6 +86,8 @@ export function layout(title: string, content: string): string {
       transition: background 0.15s;
     }
     .btn:hover { background: #2ea043; }
+    .btn--primary { background: #1f6feb; }
+    .btn--primary:hover { background: #388bfd; }
     .btn--sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
     .btn--danger { background: #da3633; }
     .btn--danger:hover { background: #f85149; }
