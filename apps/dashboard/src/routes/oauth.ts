@@ -29,7 +29,7 @@ app.get('/oauth/connect/:skillDirName/:secretKey', async (c) => {
     const data = (await res.json()) as { authUrl?: string; error?: string };
 
     if (!res.ok || !data.authUrl) {
-      const errorMsg = data.error ?? 'Failed to start OAuth flow';
+      const errorMsg = data.error ?? 'Failed to start connection flow';
       const isCredsMissing = errorMsg.includes('not configured with credentials');
       const hint = isCredsMissing
         ? `<p style="margin-top:0.5rem">OAuth credentials need to be configured first. <a href="/skills/${encodeURIComponent(skillDirName)}">Go to skill settings</a> to set up the ${provider} OAuth app.</p>`

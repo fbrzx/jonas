@@ -340,7 +340,7 @@ app.post('/chat/send', async (c) => {
   const message = String(body.message ?? '').trim();
   const sessionKey = String(body.sessionKey ?? '');
 
-  if (!message) return c.text('', 204);
+  if (!message) return c.body(null, 204);
 
   try {
     const res = await fetch(`${AGENT_URL()}/api/chat`, {

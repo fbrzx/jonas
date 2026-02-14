@@ -14,10 +14,15 @@ check_node() {
   fi
 }
 
-# Check service via bash /dev/tcp inside container
+# Check service via TCP connection inside container
 check_tcp() {
   local name="$1" service="$2" port="$3"
+  # Try bash first (supports /dev/tcp), fallback to basic nc/curl/wget check
   if docker compose exec -T "$service" bash -c "echo > /dev/tcp/localhost/$port" 2>/dev/null; then
+    echo "  [OK] $name"
+  elif docker compose exec -T "$service" sh -c "command -v nc >/dev/null && nc -z localhost $port" 2>/dev/null; then
+    echo "  [OK] $name"
+  elif docker compose exec -T "$service" sh -c "command -v curl >/dev/null && curl -sf http://localhost:$port >/dev/null" 2>/dev/null; then
     echo "  [OK] $name"
   else
     echo "  [FAIL] $name ($service :$port)"
@@ -27,14 +32,22 @@ check_tcp() {
 # Check Docker healthcheck status
 check_docker_health() {
   local name="$1" service="$2"
-  local status
-  status=$(docker compose ps --format json "$service" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('Health',''))" 2>/dev/null || echo "")
-  if [ "$status" = "healthy" ]; then
+  local json_output
+  json_output=$(docker compose ps --format json "$service" 2>/dev/null || echo "")
+
+  if [ -z "$json_output" ]; then
+    echo "  [WARN] $name (service not found)"
+    return
+  fi
+
+  # Extract Health field using grep (portable, no jq needed)
+  if echo "$json_output" | grep -q '"Health":"healthy"'; then
     echo "  [OK] $name (docker health)"
-  elif [ -z "$status" ]; then
-    echo "  [--] $name (no healthcheck)"
-  else
+  elif echo "$json_output" | grep -q '"Health":'; then
+    local status=$(echo "$json_output" | grep -o '"Health":"[^"]*"' | cut -d'"' -f4)
     echo "  [FAIL] $name (docker: $status)"
+  else
+    echo "  [--] $name (no healthcheck)"
   fi
 }
 

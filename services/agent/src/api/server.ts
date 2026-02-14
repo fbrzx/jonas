@@ -250,7 +250,7 @@ export function createApiServer(deps: ApiDeps) {
     const body = await c.req.json<{
       dirName: string;
       skillMd: string;
-      config?: { requiredSecrets?: string[]; pythonDependencies?: string[] };
+      config?: { requiredSecrets?: string[]; pythonDependencies?: string[]; oauth?: Record<string, { provider: string; scopes: string[] }> };
       toolServerPy?: string;
       requirementsTxt?: string;
     }>();
@@ -300,6 +300,73 @@ export function createApiServer(deps: ApiDeps) {
     const ok = await deps.skillRegistry.removeSkillValue(name, key);
     if (!ok) return c.json({ error: 'Skill not found' }, 404);
     return c.json({ success: true });
+  });
+
+  app.get('/api/skills/:name/config', (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    const name = c.req.param('name');
+    const config = deps.skillRegistry.getConfig(name);
+    if (config === null) return c.json({ error: 'Skill not found' }, 404);
+    return c.json(config);
+  });
+
+  app.put('/api/skills/:name/config', async (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    const name = c.req.param('name');
+    const config = await c.req.json();
+    const ok = await deps.skillRegistry.updateConfig(name, config);
+    if (!ok) return c.json({ error: 'Skill not found' }, 404);
+    return c.json({ success: true });
+  });
+
+  app.delete('/api/skills/:name', async (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    const name = c.req.param('name');
+    const ok = await deps.skillRegistry.delete(name);
+    if (!ok) return c.json({ error: 'Skill not found' }, 404);
+    return c.json({ success: true });
+  });
+
+  app.get('/api/skills/:name/export', async (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    const name = c.req.param('name');
+    const zipBuffer = await deps.skillRegistry.exportSkill(name);
+    if (!zipBuffer) return c.json({ error: 'Skill not found' }, 404);
+
+    const filename = `${name}.zip`;
+    return new Response(zipBuffer, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    });
+  });
+
+  app.post('/api/skills/import', async (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+
+    try {
+      const body = await c.req.parseBody();
+      const file = body.file;
+
+      if (!file || typeof file === 'string') {
+        return c.json({ error: 'No file uploaded' }, 400);
+      }
+
+      // Read file buffer
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      const overwrite = body.overwrite === 'true';
+      const skill = await deps.skillRegistry.importSkill(buffer, overwrite);
+
+      return c.json({ success: true, skill }, 201);
+    } catch (err) {
+      log.error(err, 'Failed to import skill');
+      const msg = err instanceof Error ? err.message : 'Failed to import skill';
+      return c.json({ error: msg }, 400);
+    }
   });
 
   // --- OAuth provider endpoints ---

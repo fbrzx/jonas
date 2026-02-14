@@ -1,7 +1,8 @@
-import { readFile, writeFile, readdir, mkdir, access, constants } from 'node:fs/promises';
+import { readFile, writeFile, readdir, mkdir, rm, access, constants } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import AdmZip from 'adm-zip';
 import { createLogger, isoNow } from '@jonas/shared/utils';
 import type { Skill, SkillConfig, SkillMetadata, SkillStatus, Connection } from '@jonas/shared/types';
 import { loadSkillState, saveSkillState, type SkillStateMap } from './storage.js';
@@ -314,5 +315,152 @@ export class SkillRegistry {
       };
     }
     return servers;
+  }
+
+  /** Get skill config.json */
+  getConfig(name: string): SkillConfig | null {
+    const skill = this.skills.get(name);
+    if (!skill) return null;
+    return skill.config ?? null;
+  }
+
+  /** Update skill config.json */
+  async updateConfig(name: string, config: SkillConfig): Promise<boolean> {
+    const skill = this.skills.get(name);
+    if (!skill) return false;
+    const configPath = join(skill.filePath, 'config.json');
+    await writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    skill.config = config;
+    log.info({ skill: name }, 'Config updated');
+    return true;
+  }
+
+  /** Delete a skill from disk and registry */
+  async delete(name: string): Promise<boolean> {
+    const skill = this.skills.get(name);
+    if (!skill) return false;
+
+    // Remove from disk
+    await rm(skill.filePath, { recursive: true, force: true });
+
+    // Remove from memory
+    this.skills.delete(name);
+    this.bodies.delete(name);
+    delete this.state[name];
+    await saveSkillState(STATE_PATH, this.state);
+
+    log.info({ skill: name }, 'Skill deleted');
+    return true;
+  }
+
+  /** Export a skill as a .zip file (returns Buffer) */
+  async exportSkill(name: string): Promise<Buffer | null> {
+    const skill = this.skills.get(name);
+    if (!skill) return null;
+
+    const zip = new AdmZip();
+    const skillDir = skill.filePath;
+
+    // Add skill.md (required)
+    const mdPath = join(skillDir, 'skill.md');
+    if (await fileExists(mdPath)) {
+      const content = await readFile(mdPath);
+      zip.addFile('skill.md', content);
+    } else {
+      log.warn({ skill: name }, 'skill.md not found during export');
+      return null;
+    }
+
+    // Add config.json if exists
+    const configPath = join(skillDir, 'config.json');
+    if (await fileExists(configPath)) {
+      const content = await readFile(configPath);
+      zip.addFile('config.json', content);
+    }
+
+    // Add tools/server.py if exists
+    const toolsPath = join(skillDir, 'tools', 'server.py');
+    if (await fileExists(toolsPath)) {
+      const content = await readFile(toolsPath);
+      zip.addFile('tools/server.py', content);
+    }
+
+    // Add requirements.txt if exists
+    const reqPath = join(skillDir, 'requirements.txt');
+    if (await fileExists(reqPath)) {
+      const content = await readFile(reqPath);
+      zip.addFile('requirements.txt', content);
+    }
+
+    log.info({ skill: name }, 'Skill exported');
+    return zip.toBuffer();
+  }
+
+  /** Import a skill from a .zip file buffer */
+  async importSkill(zipBuffer: Buffer, overwrite = false): Promise<Skill> {
+    const zip = new AdmZip(zipBuffer);
+    const entries = zip.getEntries();
+
+    // Detect if files are nested in a parent directory
+    let baseDir = '';
+    const skillMdEntry = entries.find((e) => !e.isDirectory && e.entryName.endsWith('skill.md'));
+
+    if (!skillMdEntry) {
+      throw new Error('Invalid skill package: missing skill.md');
+    }
+
+    // Extract base directory if present (e.g., "my-skill/" from "my-skill/skill.md")
+    const entryPath = skillMdEntry.entryName;
+    if (entryPath.includes('/')) {
+      const parts = entryPath.split('/');
+      if (parts.length > 1 && parts[parts.length - 1] === 'skill.md') {
+        baseDir = parts.slice(0, -1).join('/') + '/';
+      }
+    }
+
+    const skillMd = skillMdEntry.getData().toString('utf-8');
+    const { meta } = parseFrontmatter(skillMd);
+    const dirName = (meta.name || 'imported-skill').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+
+    // Check if skill already exists
+    if (this.skills.has(dirName) && !overwrite) {
+      throw new Error(`Skill "${dirName}" already exists. Set overwrite=true to replace.`);
+    }
+
+    const skillDir = join(SKILLS_DIR, dirName);
+
+    // Create skill directory
+    await mkdir(skillDir, { recursive: true });
+
+    // Extract all entries, stripping base directory if present
+    for (const entry of entries) {
+      if (entry.isDirectory) continue;
+
+      // Skip files not in the base directory
+      if (baseDir && !entry.entryName.startsWith(baseDir)) continue;
+
+      // Get relative path by removing base directory
+      const relativePath = baseDir ? entry.entryName.slice(baseDir.length) : entry.entryName;
+
+      // Skip hidden files and macOS metadata
+      if (relativePath.startsWith('.') || relativePath.includes('/__MACOSX/')) continue;
+
+      const targetPath = join(skillDir, relativePath);
+      const targetDir = join(targetPath, '..');
+
+      // Ensure parent directory exists
+      await mkdir(targetDir, { recursive: true });
+
+      // Write file
+      await writeFile(targetPath, entry.getData());
+    }
+
+    // Load the skill into registry
+    await this.loadSkill(dirName);
+    const skill = this.skills.get(dirName);
+    if (!skill) throw new Error('Skill imported but not found in registry');
+
+    log.info({ skill: dirName, baseDir }, 'Skill imported');
+    return skill;
   }
 }

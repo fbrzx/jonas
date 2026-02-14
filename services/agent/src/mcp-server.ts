@@ -208,7 +208,7 @@ server.tool(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, cron, prompt, targetChannel }),
     });
-    const data = await res.json();
+    const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to create task' }) }], isError: true };
     }
@@ -222,7 +222,7 @@ server.tool(
   {},
   async () => {
     const res = await fetch(`${AGENT_API}/api/tasks`);
-    const data = await res.json();
+    const data = await res.json() as unknown;
     return { content: [{ type: 'text', text: JSON.stringify(data) }] };
   },
 );
@@ -235,7 +235,7 @@ server.tool(
   },
   async ({ id }) => {
     const res = await fetch(`${AGENT_API}/api/tasks/${id}`, { method: 'DELETE' });
-    const data = await res.json();
+    const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to remove task' }) }], isError: true };
     }
@@ -268,7 +268,7 @@ server.tool(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await res.json();
+    const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to update task' }) }], isError: true };
     }
@@ -284,7 +284,7 @@ server.tool(
   {},
   async () => {
     const res = await fetch(`${AGENT_API}/api/skills`);
-    const data = await res.json();
+    const data = await res.json() as unknown;
     return { content: [{ type: 'text', text: JSON.stringify(data) }] };
   },
 );
@@ -296,8 +296,8 @@ server.tool(
     name: z.string().describe('Skill directory name to enable'),
   },
   async ({ name }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${name}/enable`, { method: 'POST' });
-    const data = await res.json();
+    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/enable`, { method: 'POST' });
+    const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed' }) }], isError: true };
     }
@@ -312,8 +312,8 @@ server.tool(
     name: z.string().describe('Skill directory name to disable'),
   },
   async ({ name }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${name}/disable`, { method: 'POST' });
-    const data = await res.json();
+    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/disable`, { method: 'POST' });
+    const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed' }) }], isError: true };
     }
@@ -325,16 +325,31 @@ server.tool(
   'skill_create',
   `Create a new skill. A skill is a directory in /data/skills/ containing:
 - skill.md: YAML frontmatter (name, description, version, author) + markdown instructions for Claude
-- config.json (optional): { requiredSecrets: string[], pythonDependencies: string[] }
+- config.json (optional): declares what the skill needs
 - tools/server.py (optional): Python FastMCP server providing MCP tools (communicates via stdio)
 - requirements.txt (optional): Python pip dependencies for the tool server
 
 The skill.md body becomes part of the system prompt when the skill is enabled.
-The tool server (if provided) is spawned as a child process and its tools become available to Claude.`,
+The tool server (if provided) is spawned as a child process and its tools become available to Claude.
+
+config.json structure:
+{
+  "requiredSecrets": ["API_KEY"],           // API keys the skill needs (set via skill_set_value)
+  "oauth": {                                // OAuth tokens the skill needs
+    "GMAIL_TOKEN": {                        // key name — token stored under this name
+      "provider": "google",                 // provider ID (google, github, or custom)
+      "scopes": ["https://www.googleapis.com/auth/gmail.readonly"]
+    }
+  },
+  "pythonDependencies": ["requests"]        // pip packages for the tool server
+}
+
+For OAuth skills: after creating, use skill_set_oauth_provider to store the user's OAuth app credentials,
+then skill_oauth_link to generate a clickable authorization URL for the user.`,
   {
     dirName: z.string().describe('Directory name for the skill (lowercase, hyphens, e.g., "gmail-summary")'),
     skillMd: z.string().describe('Full content of skill.md including YAML frontmatter (---\\nname: ...\\n---) and markdown body with instructions'),
-    configJson: z.string().optional().describe('JSON string for config.json (e.g., {"requiredSecrets":["API_KEY"]})'),
+    configJson: z.string().optional().describe('JSON string for config.json. For OAuth skills include the oauth field, e.g., {"oauth":{"GMAIL_TOKEN":{"provider":"google","scopes":["https://www.googleapis.com/auth/gmail.readonly"]}}}'),
     toolServerPy: z.string().optional().describe('Python source code for tools/server.py (FastMCP server)'),
     requirementsTxt: z.string().optional().describe('Contents of requirements.txt (pip dependencies, one per line)'),
   },
@@ -351,11 +366,47 @@ The tool server (if provided) is spawned as a child process and its tools become
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const data = await res.json();
+    const data = await res.json() as { error?: string; dirName?: string; metadata?: { name?: string }; config?: { requiredSecrets?: string[]; oauth?: Record<string, unknown> } };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to create skill' }) }], isError: true };
     }
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, skill: data }) }] };
+
+    // Build helpful next steps message
+    const dashboardUrl = process.env.DASHBOARD_URL ?? 'http://localhost:3000';
+    const skillUrl = `${dashboardUrl}/skills/${encodeURIComponent(data.dirName ?? 'unknown')}`;
+    const hasConfig = data.config?.requiredSecrets || data.config?.oauth;
+
+    let nextSteps = `Skill "${data.metadata?.name ?? 'Unknown'}" created successfully!`;
+
+    if (hasConfig) {
+      nextSteps += `\n\n⚠️ This skill requires configuration before it can be used.`;
+      nextSteps += `\n\nPlease visit the dashboard to set up the required credentials:`;
+      nextSteps += `\n${skillUrl}`;
+
+      if (data.config?.oauth) {
+        const oauthKeys = Object.keys(data.config.oauth);
+        nextSteps += `\n\nOAuth connections needed: ${oauthKeys.join(', ')}`;
+      }
+
+      if (data.config?.requiredSecrets) {
+        nextSteps += `\n\nAPI keys needed: ${data.config.requiredSecrets.join(', ')}`;
+      }
+
+      nextSteps += `\n\nAlternatively, you can use the skill_set_value and skill_set_oauth_provider tools to configure the skill via chat.`;
+    } else {
+      nextSteps += `\n\nThe skill is ready to use. Enable it from: ${skillUrl}`;
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          skill: data,
+          message: nextSteps,
+        }, null, 2)
+      }]
+    };
   },
 );
 
@@ -368,16 +419,139 @@ server.tool(
     value: z.string().describe('Value to store (will be encrypted if master key is set)'),
   },
   async ({ name, key, value }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${name}/values`, {
+    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/values`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, value }),
     });
-    const data = await res.json();
+    const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed' }) }], isError: true };
     }
     return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Value "${key}" set for skill "${name}"` }) }] };
+  },
+);
+
+server.tool(
+  'skill_get_config',
+  'Get the config.json for a skill.',
+  {
+    name: z.string().describe('Skill directory name'),
+  },
+  async ({ name }) => {
+    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/config`);
+    const data = await res.json() as { error?: string };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+  },
+);
+
+server.tool(
+  'skill_update_config',
+  'Update the config.json for a skill. Replaces the entire config.json file.',
+  {
+    name: z.string().describe('Skill directory name'),
+    configJson: z.string().describe('New config.json content as JSON string'),
+  },
+  async ({ name, configJson }) => {
+    let config;
+    try {
+      config = JSON.parse(configJson);
+    } catch {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid JSON in configJson' }) }], isError: true };
+    }
+
+    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    const data = await res.json() as { error?: string };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to update config' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Config updated for skill "${name}"` }) }] };
+  },
+);
+
+server.tool(
+  'skill_delete',
+  'Delete a skill completely. This removes the skill directory and all its files. Cannot be undone.',
+  {
+    name: z.string().describe('Skill directory name'),
+  },
+  async ({ name }) => {
+    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+    const data = await res.json() as { error?: string };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to delete skill' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Skill "${name}" deleted` }) }] };
+  },
+);
+
+server.tool(
+  'skill_export',
+  'Export a skill as a .zip file. Returns a base64-encoded zip that can be shared or saved.',
+  {
+    name: z.string().describe('Skill directory name'),
+  },
+  async ({ name }) => {
+    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/export`);
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Skill not found or export failed' }) }], isError: true };
+    }
+    const buffer = await res.arrayBuffer();
+    const base64 = Buffer.from(buffer).toString('base64');
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          message: `Skill "${name}" exported`,
+          filename: `${name}.zip`,
+          size: buffer.byteLength,
+          base64: base64.slice(0, 100) + '...' // truncate for display
+        })
+      }]
+    };
+  },
+);
+
+server.tool(
+  'skill_import',
+  'Import a skill from a .zip file. Provide the base64-encoded zip content.',
+  {
+    base64Zip: z.string().describe('Base64-encoded .zip file content'),
+    overwrite: z.boolean().optional().describe('Overwrite if skill already exists (default: false)'),
+  },
+  async ({ base64Zip, overwrite }) => {
+    try {
+      const buffer = Buffer.from(base64Zip, 'base64');
+      const formData = new FormData();
+      const blob = new Blob([buffer], { type: 'application/zip' });
+      formData.append('file', blob, 'skill.zip');
+      if (overwrite) {
+        formData.append('overwrite', 'true');
+      }
+
+      const res = await fetch(`${AGENT_API}/api/skills/import`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json() as { error?: string; skill?: unknown };
+      if (!res.ok) {
+        return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Import failed' }) }], isError: true };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, skill: data.skill }) }] };
+    } catch (err) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: (err as Error).message }) }], isError: true };
+    }
   },
 );
 
@@ -398,7 +572,7 @@ server.tool(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ clientId, clientSecret }),
     });
-    const data = await res.json();
+    const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to store credentials' }) }], isError: true };
     }
@@ -427,7 +601,7 @@ server.tool(
     const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(skillDirName)}`);
     let credentialsConfigured = false;
     if (res.ok) {
-      const skill = await res.json();
+      const skill = await res.json() as { secretKeys?: string[] };
       const secretKeys = skill.secretKeys ?? [];
       credentialsConfigured = secretKeys.includes(`__oauth_${secretKey}_client_id`);
     }

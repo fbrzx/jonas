@@ -1,9 +1,8 @@
 const NAV_ITEMS = [
-  { href: '/chat', label: 'Chat' },
   { href: '/', label: 'Status' },
+  { href: '/chat', label: 'Chat' },
   { href: '/memory', label: 'Memory' },
   { href: '/skills', label: 'Skills' },
-  { href: '/connections', label: 'Connections' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/audit', label: 'Audit' },
 ];

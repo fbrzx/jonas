@@ -15,7 +15,7 @@ services:
       - SKILLS_ENCRYPTION_KEY=${SKILLS_ENCRYPTION_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
-      - ./volumes/agent-data:/data
+      - ./.volumes/agent-data:/data
     networks:
       - internal
       - public
@@ -65,7 +65,7 @@ services:
     environment:
       QDRANT__TELEMETRY_DISABLED: "true"
     volumes:
-      - ./volumes/qdrant:/qdrant/storage
+      - ./.volumes/qdrant:/qdrant/storage
     networks:
       - internal
     healthcheck:

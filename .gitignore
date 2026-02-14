@@ -29,4 +29,6 @@ Thumbs.db
 
 # Docker volumes (bind mounts)
 volumes/
+.volumes/
+
 
