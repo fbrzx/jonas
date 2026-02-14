@@ -58,6 +58,7 @@ services:
       - DASHBOARD_TOKEN=${DASHBOARD_TOKEN}
       - AGENT_API_URL=http://agent:3001
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DOMAIN=${DOMAIN:-localhost}
     ports:
       - "127.0.0.1:3000:3000"
     networks:

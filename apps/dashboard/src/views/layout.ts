@@ -8,17 +8,30 @@ const NAV_ITEMS = [
   { href: '/tasks', label: 'Tasks' },
 ];
 
+const instanceInfo = process.env.DOMAIN || '';
+
+function getEnvironmentClass(domain: string): string {
+  if (!domain) return 'env--local';
+  if (domain.includes('localhost') || domain.includes('127.0.0.1')) return 'env--local';
+  if (domain.includes('staging') || domain.includes('stage')) return 'env--staging';
+  if (domain.includes('prod') || domain.includes('production')) return 'env--prod';
+  return 'env--other';
+}
+
 export function layout(title: string, content: string): string {
   const nav = NAV_ITEMS.map(
     (item) => `<a href="${item.href}">${item.label}</a>`
   ).join('');
+  
+  const envClass = getEnvironmentClass(instanceInfo);
+  const envLabel = instanceInfo ? `<span class="env-label ${envClass}">${instanceInfo}</span>` : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title} - Jonas Dashboard</title>
+  <title>${title} - Jonas on ${instanceInfo}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -31,8 +44,19 @@ export function layout(title: string, content: string): string {
     nav {
       background: #161b22; border-bottom: 1px solid #30363d;
       padding: 0.75rem 1.5rem; display: flex; gap: 1.5rem;
-      align-items: center;
+      align-items: center; justify-content: space-between;
     }
+    .nav-links { display: flex; gap: 1.5rem; align-items: center; }
+    .env-label {
+      display: inline-block; padding: 0.25rem 0.75rem;
+      border-radius: 4px; font-size: 0.7rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    .env--local { background: #1f6feb33; color: #58a6ff; border: 1px solid #58a6ff66; }
+    .env--staging { background: #9e6a0044; color: #d29922; border: 1px solid #d2992266; }
+    .env--prod { background: #f8514944; color: #f85149; border: 1px solid #f8514966; }
+    .env--other { background: #6e40a944; color: #bc8ef9; border: 1px solid #bc8ef966; }
     nav a {
       color: #58a6ff; text-decoration: none; font-size: 0.875rem;
       padding: 0.25rem 0.5rem; border-radius: 4px;
@@ -168,7 +192,7 @@ export function layout(title: string, content: string): string {
   </style>
 </head>
 <body>
-  <nav>${nav}</nav>
+  <nav><div class="nav-links">${nav}</div>${envLabel}</nav>
   <main>${content}</main>
   <footer>Jonas Dashboard</footer>
 </body>
