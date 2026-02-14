@@ -3,14 +3,14 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createLogger, isoNow } from '@jonas/shared/utils';
-import type { Skill, SkillConfig, SkillMetadata, SkillStatus } from '@jonas/shared/types';
+import type { Skill, SkillConfig, SkillMetadata, SkillStatus, Connection } from '@jonas/shared/types';
 import { loadSkillState, saveSkillState, type SkillStateMap } from './storage.js';
 import type { SkillCryptoStore } from './crypto-store.js';
 
 const log = createLogger('skill-registry');
 const execFileAsync = promisify(execFile);
 
-const SKILLS_DIR = '/data/skills-custom';
+const SKILLS_DIR = '/data/skills';
 const STATE_PATH = '/data/skills.json';
 
 interface McpServerEntry {
@@ -140,6 +140,7 @@ export class SkillRegistry {
     };
 
     const skill: Skill = {
+      dirName,
       metadata,
       status,
       filePath: skillDir,
@@ -252,6 +253,52 @@ export class SkillRegistry {
       }
     }
     return prompts;
+  }
+
+  async setOAuthCredentials(
+    skillDirName: string,
+    secretKey: string,
+    clientId: string,
+    clientSecret: string,
+  ): Promise<boolean> {
+    const skill = this.skills.get(skillDirName);
+    if (!skill) return false;
+    await this.cryptoStore.set(skill.filePath, `__oauth_${secretKey}_client_id`, clientId);
+    await this.cryptoStore.set(skill.filePath, `__oauth_${secretKey}_client_secret`, clientSecret);
+    skill.secretKeys = await this.cryptoStore.getKeys(skill.filePath);
+    return true;
+  }
+
+  async getOAuthCredentials(
+    skillDirName: string,
+    secretKey: string,
+  ): Promise<{ clientId: string; clientSecret: string } | null> {
+    const skill = this.skills.get(skillDirName);
+    if (!skill) return null;
+    const all = await this.cryptoStore.getAll(skill.filePath);
+    const clientId = all[`__oauth_${secretKey}_client_id`];
+    const clientSecret = all[`__oauth_${secretKey}_client_secret`];
+    if (!clientId || !clientSecret) return null;
+    return { clientId, clientSecret };
+  }
+
+  getConnections(): Connection[] {
+    const connections: Connection[] = [];
+    for (const [, skill] of this.skills) {
+      const oauth = skill.config?.oauth;
+      if (!oauth) continue;
+      for (const [secretKey, flow] of Object.entries(oauth)) {
+        connections.push({
+          skillDirName: skill.dirName,
+          skillName: skill.metadata.name,
+          secretKey,
+          provider: flow.provider,
+          connected: skill.secretKeys?.includes(secretKey) ?? false,
+          scopes: flow.scopes,
+        });
+      }
+    }
+    return connections;
   }
 
   async getMcpServers(): Promise<Record<string, McpServerEntry>> {

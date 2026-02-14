@@ -43,7 +43,7 @@ COPY --from=build /app/package.json ./
 COPY --from=build /app/pnpm-workspace.yaml ./
 
 # Create data directories owned by jonas
-RUN mkdir -p /data/vault /data/skills-custom && chown -R jonas:jonas /data
+RUN mkdir -p /data/vault /data/skills && chown -R jonas:jonas /data
 
 # Install gosu + Python (for skill MCP tool servers)
 RUN apt-get update && \

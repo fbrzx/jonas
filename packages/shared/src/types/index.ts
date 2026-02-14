@@ -3,6 +3,7 @@ export type { Skill, SkillMetadata, SkillStatus, SkillConfig } from './skill.js'
 export type { Message, Conversation, Channel, ChannelType } from './message.js';
 export type { ScheduledTask, TaskStatus } from './task.js';
 export type { AgentStatus, AuditEntry } from './api.js';
+export type { OAuthProvider, OAuthFlowConfig } from './oauth.js';
 export type {
   GatewayRequest,
   GatewayResponse,

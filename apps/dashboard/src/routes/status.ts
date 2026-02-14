@@ -8,7 +8,7 @@ interface StatusData {
   model: string;
   memoryStats: { episodic: number; semantic: number; procedural: number };
   activeConversations: number;
-  channels: { matrix: boolean; gateway: boolean };
+  channels: { dashboard: boolean; gateway: boolean };
 }
 
 function formatUptime(ms: number): string {
@@ -47,8 +47,8 @@ function renderStatus(data: StatusData): string {
         <thead><tr><th>Channel</th><th>Status</th></tr></thead>
         <tbody>
           <tr>
-            <td>Matrix</td>
-            <td><span class="badge ${data.channels.matrix ? 'badge--green' : 'badge--red'}">${data.channels.matrix ? 'connected' : 'offline'}</span></td>
+            <td>Dashboard</td>
+            <td><span class="badge ${data.channels.dashboard ? 'badge--green' : 'badge--red'}">${data.channels.dashboard ? 'connected' : 'offline'}</span></td>
           </tr>
           <tr>
             <td>Gateway</td>

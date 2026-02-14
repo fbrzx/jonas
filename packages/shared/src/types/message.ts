@@ -1,4 +1,4 @@
-export type ChannelType = 'matrix' | 'gateway' | 'api' | 'scheduler';
+export type ChannelType = 'gateway' | 'api' | 'scheduler' | 'dashboard';
 
 export interface Channel {
   type: ChannelType;

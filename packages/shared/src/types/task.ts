@@ -5,7 +5,7 @@ export interface ScheduledTask {
   name: string;
   cron: string;
   prompt: string;
-  targetRoomId: string;
+  targetChannel?: { type: string; id: string };
   status: TaskStatus;
   lastRun?: string;
   nextRun?: string;

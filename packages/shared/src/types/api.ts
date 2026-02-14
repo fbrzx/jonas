@@ -9,7 +9,7 @@ export interface AgentStatus {
   activeConversations: number;
   skillCount: number;
   channels: {
-    matrix: boolean;
+    dashboard: boolean;
     gateway: boolean;
   };
 }

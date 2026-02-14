@@ -3,7 +3,6 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLogger } from '@jonas/shared/utils';
 import { AgentCore } from './agent/core.js';
-import { MatrixChannel } from './channels/matrix.js';
 import { MemoryClient } from './memory/client.js';
 import { EmbeddingClient } from './memory/embeddings.js';
 import { MemoryRetriever } from './memory/retriever.js';
@@ -12,6 +11,8 @@ import { createApiServer } from './api/server.js';
 import { TaskScheduler } from './tasks/scheduler.js';
 import { SkillRegistry } from './skills/registry.js';
 import { SkillCryptoStore } from './skills/crypto-store.js';
+import { OAuthProviderStore } from './oauth/provider-store.js';
+import { OAuthHandler } from './oauth/handler.js';
 
 const log = createLogger('jonas');
 
@@ -57,33 +58,28 @@ async function main() {
   await skillRegistry.load();
   log.info({ skills: skillRegistry.list().length }, 'Skill registry loaded');
 
+  // Initialize OAuth
+  const oauthProviderStore = new OAuthProviderStore(skillCrypto);
+  await oauthProviderStore.load();
+  const oauthHandler = new OAuthHandler({ providerStore: oauthProviderStore, skillRegistry });
+  log.info('OAuth provider store loaded');
+
   // Initialize agent core
   const agent = new AgentCore({ retriever, extractor, claudeBin, mcpConfigPath, skillRegistry });
-
-  // Initialize Matrix channel (non-fatal)
-  const matrix = new MatrixChannel(agent);
-  if (process.env.MATRIX_HOMESERVER && process.env.MATRIX_BOT_PASSWORD) {
-    try {
-      await matrix.start();
-      log.info('Matrix channel started');
-    } catch (err) {
-      log.error(err, 'Matrix channel failed to start, continuing without it');
-    }
-  } else {
-    log.warn('Matrix not configured, skipping');
-  }
 
   // Initialize task scheduler
   const scheduler = new TaskScheduler({
     agent,
-    sendMessage: (roomId, text) => matrix.sendToRoom(roomId, text),
+    dispatchOutput: async (channel, text) => {
+      log.info({ channel, textLen: text.length }, 'Task output (no delivery channel configured)');
+    },
     storagePath: '/data/tasks.json',
   });
   await scheduler.start();
   log.info('Task scheduler started');
 
   // Start internal API server
-  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry });
+  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler });
   const port = Number(process.env.AGENT_PORT ?? 3001);
 
   const { serve } = await import('@hono/node-server');
@@ -97,7 +93,6 @@ async function main() {
   const shutdown = async () => {
     log.info('Shutting down...');
     scheduler.stop();
-    if (matrix.isRunning) await matrix.stop();
     process.exit(0);
   };
   process.on('SIGTERM', shutdown);

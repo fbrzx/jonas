@@ -191,18 +191,22 @@ const AGENT_API = process.env.AGENT_API_URL ?? 'http://localhost:3001';
 
 server.tool(
   'task_schedule',
-  'Schedule a recurring task. The task will run on the cron schedule, execute the prompt via Claude, and send the result to the specified Matrix room.',
+  'Schedule a recurring task. The task will run on the cron schedule and execute the prompt via Claude. Optionally specify a target channel for output delivery.',
   {
     name: z.string().describe('Human-readable name for the task'),
     cron: z.string().describe('Cron expression (e.g., "0 8 * * *" for daily at 8am)'),
     prompt: z.string().describe('Natural language instruction for Claude to execute'),
-    targetRoomId: z.string().describe('Matrix room ID to send results to (e.g., "!abc:example.com")'),
+    targetChannelType: z.string().optional().describe('Output channel type (e.g., "dashboard")'),
+    targetChannelId: z.string().optional().describe('Output channel ID'),
   },
-  async ({ name, cron, prompt, targetRoomId }) => {
+  async ({ name, cron, prompt, targetChannelType, targetChannelId }) => {
+    const targetChannel = targetChannelType && targetChannelId
+      ? { type: targetChannelType, id: targetChannelId }
+      : undefined;
     const res = await fetch(`${AGENT_API}/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, cron, prompt, targetRoomId }),
+      body: JSON.stringify({ name, cron, prompt, targetChannel }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -241,18 +245,24 @@ server.tool(
 
 server.tool(
   'task_update',
-  'Update a scheduled task. Can change name, cron schedule, prompt, target room, or enable/disable.',
+  'Update a scheduled task. Can change name, cron schedule, prompt, target channel, or enable/disable.',
   {
     id: z.string().describe('Task ID to update'),
     name: z.string().optional().describe('New name'),
     cron: z.string().optional().describe('New cron expression'),
     prompt: z.string().optional().describe('New prompt'),
-    targetRoomId: z.string().optional().describe('New target room ID'),
+    targetChannelType: z.string().optional().describe('New output channel type'),
+    targetChannelId: z.string().optional().describe('New output channel ID'),
     enabled: z.boolean().optional().describe('Enable or disable the task'),
   },
-  async ({ id, ...changes }) => {
+  async ({ id, targetChannelType, targetChannelId, ...rest }) => {
     // Filter out undefined values
-    const body = Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined));
+    const body: Record<string, unknown> = Object.fromEntries(
+      Object.entries(rest).filter(([, v]) => v !== undefined),
+    );
+    if (targetChannelType && targetChannelId) {
+      body.targetChannel = { type: targetChannelType, id: targetChannelId };
+    }
     const res = await fetch(`${AGENT_API}/api/tasks/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -313,7 +323,7 @@ server.tool(
 
 server.tool(
   'skill_create',
-  `Create a new skill. A skill is a directory in /data/skills-custom/ containing:
+  `Create a new skill. A skill is a directory in /data/skills/ containing:
 - skill.md: YAML frontmatter (name, description, version, author) + markdown instructions for Claude
 - config.json (optional): { requiredSecrets: string[], pythonDependencies: string[] }
 - tools/server.py (optional): Python FastMCP server providing MCP tools (communicates via stdio)
@@ -368,6 +378,72 @@ server.tool(
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed' }) }], isError: true };
     }
     return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Value "${key}" set for skill "${name}"` }) }] };
+  },
+);
+
+// --- OAuth tools (chat-guided OAuth) ---
+
+server.tool(
+  'skill_set_oauth_provider',
+  'Store OAuth app credentials (client ID and secret) for a specific skill\'s OAuth key. The user must first create an OAuth app in the provider\'s developer console.',
+  {
+    skillDirName: z.string().describe('Skill directory name'),
+    secretKey: z.string().describe('The OAuth key name from the skill config (e.g., "GMAIL_TOKEN")'),
+    clientId: z.string().describe('OAuth client ID from the provider'),
+    clientSecret: z.string().describe('OAuth client secret from the provider'),
+  },
+  async ({ skillDirName, secretKey, clientId, clientSecret }) => {
+    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(skillDirName)}/oauth-provider/${encodeURIComponent(secretKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, clientSecret }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to store credentials' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `OAuth credentials stored for ${skillDirName}/${secretKey}` }) }] };
+  },
+);
+
+server.tool(
+  'skill_oauth_link',
+  'Generate a clickable OAuth authorization URL that the user can click in chat to connect a service. Returns the URL to include in a markdown link.',
+  {
+    skillDirName: z.string().describe('Skill directory name'),
+    secretKey: z.string().describe('The OAuth key name from the skill config (e.g., "GMAIL_TOKEN")'),
+    provider: z.string().describe('OAuth provider ID (e.g., "google", "github")'),
+    scopes: z.array(z.string()).describe('OAuth scopes to request'),
+  },
+  async ({ skillDirName, secretKey, provider, scopes }) => {
+    const dashboardUrl = process.env.DASHBOARD_URL ?? 'http://localhost:3000';
+    const params = new URLSearchParams({
+      provider,
+      scopes: scopes.join(','),
+    });
+    const connectUrl = `${dashboardUrl}/oauth/connect/${encodeURIComponent(skillDirName)}/${encodeURIComponent(secretKey)}?${params.toString()}`;
+
+    // Check if provider credentials are configured
+    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(skillDirName)}`);
+    let credentialsConfigured = false;
+    if (res.ok) {
+      const skill = await res.json();
+      const secretKeys = skill.secretKeys ?? [];
+      credentialsConfigured = secretKeys.includes(`__oauth_${secretKey}_client_id`);
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          connectUrl,
+          credentialsConfigured,
+          message: credentialsConfigured
+            ? `OAuth link ready. Share this with the user: [Connect ${provider}](${connectUrl})`
+            : `OAuth credentials not yet configured for ${secretKey}. Use skill_set_oauth_provider first, then generate the link again.`,
+        }),
+      }],
+    };
   },
 );
 

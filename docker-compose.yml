@@ -7,9 +7,6 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - VOYAGE_API_KEY=${VOYAGE_API_KEY}
-      - MATRIX_HOMESERVER=http://conduit:6167
-      - MATRIX_BOT_USER=${MATRIX_BOT_USER}
-      - MATRIX_BOT_PASSWORD=${MATRIX_BOT_PASSWORD}
       - QDRANT_URL=http://qdrant:6333
       - AGENT_PORT=3001
       - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-claude-sonnet-4-5-20250929}
@@ -18,17 +15,13 @@ services:
       - SKILLS_ENCRYPTION_KEY=${SKILLS_ENCRYPTION_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
-      - vault_data:/data/vault
-      - skills_data:/data/skills-custom
-      - agent_storage:/data
+      - ./volumes/agent-data:/data
     networks:
       - internal
       - public
     depends_on:
       qdrant:
         condition: service_healthy
-      conduit:
-        condition: service_started
 
   gateway:
     build:
@@ -66,32 +59,13 @@ services:
     depends_on:
       - agent
 
-  conduit:
-    image: matrixconduit/matrix-conduit:latest
-    restart: unless-stopped
-    environment:
-      CONDUIT_CONFIG: /etc/conduit.toml
-    volumes:
-      - ./deploy/conduit/conduit.toml:/etc/conduit.toml:ro
-      - conduit_data:/var/lib/matrix-conduit
-    networks:
-      - internal
-
-  element-web:
-    image: vectorim/element-web:latest
-    restart: unless-stopped
-    volumes:
-      - ./deploy/element-web/config.json:/app/config.json:ro
-    networks:
-      - internal
-
   qdrant:
     image: qdrant/qdrant:latest
     restart: unless-stopped
     environment:
       QDRANT__TELEMETRY_DISABLED: "true"
     volumes:
-      - qdrant_data:/qdrant/storage
+      - ./volumes/qdrant:/qdrant/storage
     networks:
       - internal
     healthcheck:
@@ -99,40 +73,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-  nginx:
-    image: nginx:alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    volumes:
-      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
-      - certbot_webroot:/var/www/certbot:ro
-    networks:
-      - internal
-      - public
-    depends_on:
-      - conduit
-      - element-web
-
-  certbot:
-    image: certbot/certbot:latest
-    volumes:
-      - certbot_webroot:/var/www/certbot
-      - certbot_certs:/etc/letsencrypt
-    networks:
-      - public
-    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done"
-
-volumes:
-  vault_data:
-  skills_data:
-  agent_storage:
-  conduit_data:
-  qdrant_data:
-  certbot_webroot:
-  certbot_certs:
 
 networks:
   internal:

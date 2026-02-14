@@ -6,6 +6,8 @@ import type { MemoryClient } from '../memory/client.js';
 import type { MemoryRetriever } from '../memory/retriever.js';
 import type { TaskScheduler } from '../tasks/scheduler.js';
 import type { SkillRegistry } from '../skills/registry.js';
+import type { OAuthProviderStore } from '../oauth/provider-store.js';
+import type { OAuthHandler } from '../oauth/handler.js';
 
 const log = createLogger('api');
 
@@ -15,6 +17,8 @@ interface ApiDeps {
   retriever: MemoryRetriever;
   scheduler?: TaskScheduler;
   skillRegistry?: SkillRegistry;
+  oauthProviderStore?: OAuthProviderStore;
+  oauthHandler?: OAuthHandler;
 }
 
 export function createApiServer(deps: ApiDeps) {
@@ -37,7 +41,7 @@ export function createApiServer(deps: ApiDeps) {
       activeConversations: deps.agent.activeConversationCount,
       skillCount: deps.skillRegistry?.list().length ?? 0,
       channels: {
-        matrix: !!process.env.MATRIX_HOMESERVER,
+        dashboard: true,
         gateway: true,
       },
     });
@@ -53,7 +57,7 @@ export function createApiServer(deps: ApiDeps) {
     }>();
 
     const channel = {
-      type: (body.channelType ?? 'api') as 'api' | 'matrix' | 'gateway',
+      type: (body.channelType ?? 'api') as 'api' | 'gateway' | 'dashboard',
       id: body.channelId ?? 'api',
     };
 
@@ -70,11 +74,71 @@ export function createApiServer(deps: ApiDeps) {
     }
   });
 
+  // Streaming chat endpoint (SSE)
+  app.post('/api/chat/stream', async (c) => {
+    const body = await c.req.json<{
+      message: string;
+      sessionKey?: string;
+      channelType?: string;
+      channelId?: string;
+    }>();
+
+    const channel = {
+      type: (body.channelType ?? 'dashboard') as 'api' | 'gateway' | 'dashboard',
+      id: body.channelId ?? 'dashboard',
+    };
+
+    return new Response(
+      new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          const send = (event: string, data: unknown) => {
+            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          };
+
+          send('thinking', { status: 'thinking' });
+
+          try {
+            const response = await deps.agent.chat(
+              body.message,
+              channel,
+              body.sessionKey,
+            );
+            send('message', { content: response });
+            send('done', { status: 'done' });
+          } catch (err) {
+            const msg = err instanceof Error && err.name === 'AbortError'
+              ? 'Response was aborted'
+              : 'Chat failed';
+            log.error(err, 'Stream chat failed');
+            send('error', { error: msg });
+          } finally {
+            controller.close();
+          }
+        },
+      }),
+      {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      },
+    );
+  });
+
   // Abort current execution
   app.post('/api/chat/abort', async (c) => {
     const { sessionKey } = await c.req.json<{ sessionKey: string }>();
     const aborted = deps.agent.abort(sessionKey);
     return c.json({ aborted });
+  });
+
+  // Reset session
+  app.post('/api/chat/reset', async (c) => {
+    const { sessionKey } = await c.req.json<{ sessionKey: string }>();
+    deps.agent.resetSession(sessionKey);
+    return c.json({ success: true });
   });
 
   // Memory search
@@ -122,10 +186,10 @@ export function createApiServer(deps: ApiDeps) {
       name: string;
       cron: string;
       prompt: string;
-      targetRoomId: string;
+      targetChannel?: { type: string; id: string };
     }>();
-    if (!body.name || !body.cron || !body.prompt || !body.targetRoomId) {
-      return c.json({ error: 'Missing required fields: name, cron, prompt, targetRoomId' }, 400);
+    if (!body.name || !body.cron || !body.prompt) {
+      return c.json({ error: 'Missing required fields: name, cron, prompt' }, 400);
     }
     try {
       const task = await deps.scheduler.add(body);
@@ -171,6 +235,14 @@ export function createApiServer(deps: ApiDeps) {
   app.get('/api/skills', (c) => {
     if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
     return c.json(deps.skillRegistry.list());
+  });
+
+  app.get('/api/skills/:name', (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    const name = c.req.param('name');
+    const skill = deps.skillRegistry.get(name);
+    if (!skill) return c.json({ error: 'Skill not found' }, 404);
+    return c.json(skill);
   });
 
   app.post('/api/skills', async (c) => {
@@ -226,6 +298,125 @@ export function createApiServer(deps: ApiDeps) {
     const name = c.req.param('name');
     const key = c.req.param('key');
     const ok = await deps.skillRegistry.removeSkillValue(name, key);
+    if (!ok) return c.json({ error: 'Skill not found' }, 404);
+    return c.json({ success: true });
+  });
+
+  // --- OAuth provider endpoints ---
+
+  app.get('/api/oauth/providers', (c) => {
+    if (!deps.oauthProviderStore) return c.json({ error: 'OAuth not available' }, 503);
+    return c.json(deps.oauthProviderStore.list());
+  });
+
+  app.put('/api/oauth/providers/:id', async (c) => {
+    if (!deps.oauthProviderStore) return c.json({ error: 'OAuth not available' }, 503);
+    const id = c.req.param('id');
+    const body = await c.req.json<{
+      name: string;
+      authEndpoint: string;
+      tokenEndpoint: string;
+      clientId: string;
+      clientSecret?: string;
+    }>();
+    if (!body.name || !body.clientId) {
+      return c.json({ error: 'Missing required fields' }, 400);
+    }
+    // Preserve existing secret if not provided
+    const existing = deps.oauthProviderStore.get(id);
+    const clientSecret = body.clientSecret || existing?.clientSecret || '';
+    if (!clientSecret) {
+      return c.json({ error: 'Client secret is required for new providers' }, 400);
+    }
+    await deps.oauthProviderStore.upsert({
+      id,
+      name: body.name,
+      authEndpoint: body.authEndpoint,
+      tokenEndpoint: body.tokenEndpoint,
+      clientId: body.clientId,
+      clientSecret,
+    });
+    return c.json({ success: true });
+  });
+
+  app.delete('/api/oauth/providers/:id', async (c) => {
+    if (!deps.oauthProviderStore) return c.json({ error: 'OAuth not available' }, 503);
+    const id = c.req.param('id');
+    const ok = await deps.oauthProviderStore.remove(id);
+    if (!ok) return c.json({ error: 'Provider not found' }, 404);
+    return c.json({ success: true });
+  });
+
+  app.post('/api/oauth/authorize', async (c) => {
+    if (!deps.oauthHandler) return c.json({ error: 'OAuth not available' }, 503);
+    const body = await c.req.json<{
+      provider: string;
+      skillDirName: string;
+      secretKey: string;
+      scopes: string[];
+    }>();
+    try {
+      const result = await deps.oauthHandler.authorize(body);
+      return c.json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Authorization failed';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  // GET-friendly authorize URL (for clickable links from chat)
+  app.get('/api/oauth/authorize-url', async (c) => {
+    if (!deps.oauthHandler) return c.json({ error: 'OAuth not available' }, 503);
+    const provider = c.req.query('provider');
+    const skillDirName = c.req.query('skillDirName');
+    const secretKey = c.req.query('secretKey');
+    const scopes = c.req.query('scopes');
+    if (!provider || !skillDirName || !secretKey) {
+      return c.json({ error: 'Missing required query params: provider, skillDirName, secretKey' }, 400);
+    }
+    try {
+      const result = await deps.oauthHandler.authorize({
+        provider,
+        skillDirName,
+        secretKey,
+        scopes: scopes?.split(',').map((s) => s.trim()).filter(Boolean) ?? [],
+      });
+      return c.json(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Authorization failed';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  app.post('/api/oauth/exchange', async (c) => {
+    if (!deps.oauthHandler) return c.json({ error: 'OAuth not available' }, 503);
+    const body = await c.req.json<{ code: string; state: string }>();
+    try {
+      const result = await deps.oauthHandler.exchange(body);
+      return c.json(result);
+    } catch (err) {
+      log.error(err, 'OAuth exchange failed');
+      const msg = err instanceof Error ? err.message : 'Exchange failed';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  // --- Connections overview ---
+
+  app.get('/api/connections', (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    return c.json(deps.skillRegistry.getConnections());
+  });
+
+  // --- Inline per-skill OAuth credentials ---
+
+  app.put('/api/skills/:name/oauth-provider/:key', async (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    const name = c.req.param('name');
+    const key = c.req.param('key');
+    const { clientId, clientSecret } = await c.req.json<{ clientId: string; clientSecret: string }>();
+    if (!clientId || !clientSecret) return c.json({ error: 'Missing clientId or clientSecret' }, 400);
+    const ok = await deps.skillRegistry.setOAuthCredentials(name, key, clientId, clientSecret);
     if (!ok) return c.json({ error: 'Skill not found' }, 404);
     return c.json({ success: true });
   });

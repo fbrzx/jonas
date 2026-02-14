@@ -27,9 +27,6 @@ CLAUDE.local.md
 .DS_Store
 Thumbs.db
 
-# Docker volumes (if local)
-.docker/
+# Docker volumes (bind mounts)
+volumes/
 
-# Runtime data
-data/vault/
-data/skills-custom/

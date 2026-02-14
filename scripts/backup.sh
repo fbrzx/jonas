@@ -24,7 +24,7 @@ docker cp "$(docker compose ps -q agent)":/data/vault "$BACKUP_PATH/vault" 2>/de
 
 # Custom skills
 echo "Backing up custom skills..."
-docker cp "$(docker compose ps -q agent)":/data/skills-custom "$BACKUP_PATH/skills-custom" 2>/dev/null || true
+docker cp "$(docker compose ps -q agent)":/data/skills "$BACKUP_PATH/skills" 2>/dev/null || true
 
 # Compress
 echo "Compressing..."

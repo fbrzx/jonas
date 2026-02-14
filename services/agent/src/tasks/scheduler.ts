@@ -8,20 +8,20 @@ const log = createLogger('scheduler');
 
 interface SchedulerOptions {
   agent: AgentCore;
-  sendMessage: (roomId: string, text: string) => Promise<void>;
+  dispatchOutput: (channel: { type: string; id: string }, text: string) => Promise<void>;
   storagePath: string;
 }
 
 export class TaskScheduler {
   private agent: AgentCore;
-  private sendMessage: (roomId: string, text: string) => Promise<void>;
+  private dispatchOutput: (channel: { type: string; id: string }, text: string) => Promise<void>;
   private storagePath: string;
   private tasks: ScheduledTask[] = [];
   private jobs = new Map<string, Cron>();
 
   constructor(opts: SchedulerOptions) {
     this.agent = opts.agent;
-    this.sendMessage = opts.sendMessage;
+    this.dispatchOutput = opts.dispatchOutput;
     this.storagePath = opts.storagePath;
   }
 
@@ -45,14 +45,14 @@ export class TaskScheduler {
     name: string;
     cron: string;
     prompt: string;
-    targetRoomId: string;
+    targetChannel?: { type: string; id: string };
   }): Promise<ScheduledTask> {
     const task: ScheduledTask = {
       id: createId('task'),
       name: input.name,
       cron: input.cron,
       prompt: input.prompt,
-      targetRoomId: input.targetRoomId,
+      targetChannel: input.targetChannel,
       status: 'pending',
       enabled: true,
       createdAt: isoNow(),
@@ -83,7 +83,7 @@ export class TaskScheduler {
 
   async update(
     id: string,
-    changes: Partial<Pick<ScheduledTask, 'name' | 'cron' | 'prompt' | 'targetRoomId' | 'enabled'>>,
+    changes: Partial<Pick<ScheduledTask, 'name' | 'cron' | 'prompt' | 'targetChannel' | 'enabled'>>,
   ): Promise<ScheduledTask | null> {
     const task = this.tasks.find((t) => t.id === id);
     if (!task) return null;
@@ -151,8 +151,12 @@ export class TaskScheduler {
       task.lastResult = response.slice(0, 2000);
       await this.persist();
 
-      await this.sendMessage(task.targetRoomId, response);
-      log.info({ id: task.id, responseLen: response.length }, 'Task completed, message sent');
+      if (task.targetChannel) {
+        await this.dispatchOutput(task.targetChannel, response);
+        log.info({ id: task.id, responseLen: response.length }, 'Task completed, output dispatched');
+      } else {
+        log.info({ id: task.id, responseLen: response.length }, 'Task completed (no output channel)');
+      }
       return response;
     } catch (err) {
       task.status = 'failed';

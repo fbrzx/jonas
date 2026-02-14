@@ -8,7 +8,7 @@ interface Task {
   name: string;
   cron: string;
   prompt: string;
-  targetRoomId: string;
+  targetChannel?: { type: string; id: string };
   status: string;
   enabled: boolean;
   lastRun?: string;

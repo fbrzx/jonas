@@ -44,12 +44,10 @@ check_node "Agent API" agent "http://localhost:3001/api/status"
 check_node "Gateway" gateway "http://localhost:18789/"
 check_node "Dashboard" dashboard "http://localhost:3000/health"
 check_tcp "Qdrant" qdrant 6333
-# Conduit has no bash/node — check from agent container via internal network
-check_node "Conduit" agent "http://conduit:6167/_matrix/client/versions"
 
 echo ""
 echo "Docker healthcheck status:"
-for svc in agent gateway dashboard qdrant element-web; do
+for svc in agent gateway dashboard qdrant; do
   check_docker_health "$svc" "$svc"
 done
 
