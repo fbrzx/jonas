@@ -12,7 +12,7 @@ RUN pnpm install --frozen-lockfile
 
 COPY packages/ ./packages/
 COPY services/telegram-bot/ ./services/telegram-bot/
-RUN pnpm --filter @jonas/telegram-bot build
+RUN pnpm --filter @jonas/shared build && pnpm --filter @jonas/telegram-bot build
 
 FROM base AS runner
 WORKDIR /app
