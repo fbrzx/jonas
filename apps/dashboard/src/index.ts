@@ -41,7 +41,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 
 app.use('*', async (c, next) => {
   const path = c.req.path;
-  if (path === '/health' || path === '/login') {
+  if (path === '/health' || path === '/login' || path.startsWith('/oauth/')) {
     await next();
     return;
   }
