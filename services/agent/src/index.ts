@@ -82,8 +82,16 @@ async function main() {
   // Initialize OAuth
   const oauthProviderStore = new OAuthProviderStore(skillCrypto);
   await oauthProviderStore.load();
-  const oauthHandler = new OAuthHandler({ providerStore: oauthProviderStore, skillRegistry });
-  log.info('OAuth provider store loaded');
+  const oauthRedirectDomain = process.env.OAUTH_REDIRECT_DOMAIN;
+  const oauthRedirectUri = oauthRedirectDomain
+    ? `${oauthRedirectDomain}/oauth/callback`
+    : undefined; // Will default to http://localhost:3000/oauth/callback
+  const oauthHandler = new OAuthHandler({
+    providerStore: oauthProviderStore,
+    skillRegistry,
+    redirectUri: oauthRedirectUri
+  });
+  log.info({ redirectUri: oauthRedirectUri || 'http://localhost:3000/oauth/callback' }, 'OAuth provider store loaded');
 
   // Initialize channel pairing service
   const pairingService = new ChannelPairingService();
