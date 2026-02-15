@@ -34,6 +34,16 @@ interface Connection {
   scopes: string[];
 }
 
+interface PlatformChannel {
+  dirName: string;
+  metadata: {
+    name: string;
+    platform: string;
+  };
+  status: 'enabled' | 'disabled';
+  state: 'stopped' | 'starting' | 'running' | 'error';
+}
+
 // --- List page ---
 
 function renderConnectionsTable(connections: Connection[]): string {
@@ -341,9 +351,62 @@ function renderConfigSection(skill: Skill): string {
   return html;
 }
 
-function renderSkillDetail(skill: Skill, connections: Connection[]): string {
+function renderRequiredChannels(skill: Skill, allChannels: PlatformChannel[]): string {
+  const requiredChannels = skill.config?.requiredChannels ?? [];
+
+  if (requiredChannels.length === 0) {
+    return '';
+  }
+
+  const rows = requiredChannels.map((channelType) => {
+    // Extract channel name from format like "channel:telegram" -> "telegram"
+    const channelName = channelType.startsWith('channel:') ? channelType.slice(8) : channelType;
+    const channel = allChannels.find((ch) => ch.dirName === channelName);
+
+    if (!channel) {
+      return `
+        <tr>
+          <td><code>${channelType}</code></td>
+          <td><span class="badge badge--red">not installed</span></td>
+          <td>-</td>
+          <td><a href="/channels" class="btn btn--sm">Go to Channels</a></td>
+        </tr>`;
+    }
+
+    const isReady = channel.status === 'enabled' && channel.state === 'running';
+    const statusBadge = isReady
+      ? '<span class="badge badge--green">ready</span>'
+      : channel.status === 'disabled'
+      ? '<span class="badge badge--red">disabled</span>'
+      : channel.state === 'error'
+      ? '<span class="badge badge--red">error</span>'
+      : '<span class="badge badge--yellow">not running</span>';
+
+    return `
+      <tr>
+        <td><a href="/channels/${encodeURIComponent(channel.dirName)}"><strong>${channel.metadata.name}</strong></a></td>
+        <td>${statusBadge}</td>
+        <td>${channel.metadata.platform}</td>
+        <td><a href="/channels/${encodeURIComponent(channel.dirName)}" class="btn btn--sm">Configure</a></td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <h2 style="margin-top:2rem">Required Channels</h2>
+    <div class="card">
+      <table>
+        <thead><tr><th>Channel</th><th>Status</th><th>Platform</th><th>Action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderSkillDetail(skill: Skill, connections: Connection[], channels: PlatformChannel[]): string {
   const id = encodeURIComponent(skill.dirName);
   const configJson = skill.config ? JSON.stringify(skill.config, null, 2) : '{}';
+
+  // Filter connections to only show ones for this skill
+  const skillConnections = connections.filter((conn) => conn.skillDirName === skill.dirName);
 
   return `
     <p><a href="/skills">&larr; Back to Skills</a></p>
@@ -403,26 +466,32 @@ function renderSkillDetail(skill: Skill, connections: Connection[]): string {
       ${renderConfigSection(skill)}
     </div>
 
-    <h2 style="margin-top:2rem">All Connections</h2>
-    <div class="card">
-      ${renderConnectionsTable(connections)}
-    </div>`;
+    ${renderRequiredChannels(skill, channels)}
+
+    ${skillConnections.length > 0 ? `
+      <h2 style="margin-top:2rem">OAuth Connections</h2>
+      <div class="card">
+        ${renderConnectionsTable(skillConnections)}
+      </div>
+    ` : ''}`;
 }
 
 app.get('/skills/:id', async (c) => {
   const id = c.req.param('id');
   try {
-    const [skillRes, connectionsRes] = await Promise.all([
+    const [skillRes, connectionsRes, channelsRes] = await Promise.all([
       fetch(`${AGENT_URL()}/api/skills/${encodeURIComponent(id)}`),
       fetch(`${AGENT_URL()}/api/connections`),
+      fetch(`${AGENT_URL()}/api/channels`),
     ]);
 
     if (!skillRes.ok) return c.html(layout('Skill Not Found', '<h1>Skill not found</h1>'), 404);
 
     const skill = (await skillRes.json()) as Skill;
     const connections = connectionsRes.ok ? ((await connectionsRes.json()) as Connection[]) : [];
+    const channels = channelsRes.ok ? ((await channelsRes.json()) as PlatformChannel[]) : [];
 
-    return c.html(layout(skill.metadata.name, renderSkillDetail(skill, connections)));
+    return c.html(layout(skill.metadata.name, renderSkillDetail(skill, connections, channels)));
   } catch {
     return c.html(
       layout('Skills', '<h1>Skills</h1><p class="badge badge--red">Agent unreachable</p>'),

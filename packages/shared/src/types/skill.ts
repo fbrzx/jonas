@@ -4,6 +4,7 @@ export interface SkillConfig {
   requiredSecrets?: string[];
   pythonDependencies?: string[];
   oauth?: Record<string, import('./oauth.js').OAuthFlowConfig>;
+  requiredChannels?: string[];
 }
 
 export interface SkillMetadata {
