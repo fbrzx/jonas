@@ -15,6 +15,8 @@ services:
       - DB_PATH=/data/conversations.db
       - SKILLS_ENCRYPTION_KEY=${SKILLS_ENCRYPTION_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # OAuth configuration
+      - OAUTH_REDIRECT_DOMAIN=${OAUTH_REDIRECT_DOMAIN:-}
       # Model provider configuration
       - MODEL_PROVIDER=${MODEL_PROVIDER:-claude}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
