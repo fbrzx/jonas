@@ -135,6 +135,7 @@ export function layout(title: string, content: string): string {
     .chat-msg { max-width: 80%; padding: 0.75rem 1rem; border-radius: 8px; }
     .chat-msg--user { align-self: flex-end; background: #1f6feb; color: #fff; }
     .chat-msg--assistant { align-self: flex-start; background: #161b22; border: 1px solid #30363d; }
+    .chat-msg--error { background: #f8514911 !important; border-color: #f85149 !important; }
     .chat-msg__label { font-size: 0.7rem; font-weight: 600; margin-bottom: 0.25rem; opacity: 0.7; }
     .chat-msg__content { white-space: pre-wrap; margin: 0; font-family: inherit; font-size: 0.875rem; background: none; border: none; color: inherit; }
     .chat-input-bar { display: flex; gap: 0.5rem; padding-top: 0.75rem; border-top: 1px solid #30363d; align-items: flex-end; }
@@ -185,6 +186,9 @@ export function layout(title: string, content: string): string {
     .chat-md a { color: #58a6ff; }
     .chat-md table { border-collapse: collapse; margin: 0.4em 0; }
     .chat-md th, .chat-md td { border: 1px solid #30363d; padding: 0.3rem 0.5rem; }
+    .chat-md details { margin: 0.5em 0; padding: 0.5rem; background: #0d111744; border: 1px solid #30363d; border-radius: 4px; }
+    .chat-md details summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
+    .chat-md details[open] summary { margin-bottom: 0.75rem; }
     .info-box {
       background: #0d1117; border: 1px solid #1f6feb44; border-radius: 6px;
       padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.85rem;

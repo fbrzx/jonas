@@ -10,7 +10,10 @@ app.get('/chat', (c) => {
     <div class="chat-container">
       <div class="chat-header">
         <h2>Chat</h2>
-        <button id="btn-new-chat" class="btn btn--sm" title="New conversation">New Chat</button>
+        <div style="display:flex;gap:0.5rem">
+          <a href="/chat/history" class="btn btn--sm" style="text-decoration:none">History</a>
+          <button id="btn-new-chat" class="btn btn--sm" title="New conversation">New Chat</button>
+        </div>
       </div>
       <div id="chat-messages" class="chat-messages"></div>
       <div class="chat-input-bar">
@@ -376,6 +379,126 @@ app.post('/chat/send', async (c) => {
     return c.json(data);
   } catch {
     return c.json({ error: 'Could not reach agent' }, 502);
+  }
+});
+
+// Chat history list page
+app.get('/chat/history', async (c) => {
+  const limit = Number(c.req.query('limit')) || 50;
+  const offset = Number(c.req.query('offset')) || 0;
+
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/conversations/history?limit=${limit}&offset=${offset}`);
+    const conversations = (await res.json()) as Array<{
+      id: string;
+      lastMessage?: string;
+      lastActivity: string;
+      messageCount: number;
+      channelType?: string;
+    }>;
+
+    const rows = conversations
+      .map((conv) => {
+        const preview = conv.lastMessage ? conv.lastMessage.substring(0, 80) : 'New conversation';
+        const time = conv.lastActivity ? new Date(conv.lastActivity).toLocaleString() : 'No activity';
+        return `
+          <tr style="cursor:pointer" onclick="window.location.href='/chat/history/${encodeURIComponent(conv.id)}'">
+            <td>
+              <strong>${time}</strong><br>
+              <span class="meta">${preview}${conv.lastMessage && preview.length < conv.lastMessage.length ? '...' : ''}</span>
+            </td>
+            <td class="meta">${conv.messageCount} messages</td>
+            <td><span class="badge badge--blue">${conv.channelType || 'dashboard'}</span></td>
+            <td><a href="/chat/history/${encodeURIComponent(conv.id)}" class="btn btn--sm">View</a></td>
+          </tr>`;
+      })
+      .join('');
+
+    const pagination = `
+      <div style="margin-top:1rem;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          ${offset > 0 ? `<a href="/chat/history?limit=${limit}&offset=${Math.max(0, offset - limit)}" class="btn btn--sm">&larr; Previous</a>` : ''}
+        </div>
+        <span class="meta">Showing ${offset + 1} - ${offset + conversations.length}</span>
+        <div>
+          ${conversations.length === limit ? `<a href="/chat/history?limit=${limit}&offset=${offset + limit}" class="btn btn--sm">Next &rarr;</a>` : ''}
+        </div>
+      </div>`;
+
+    const content = `
+      <p><a href="/chat">&larr; Back to Chat</a></p>
+      <h1>Chat History</h1>
+      <div class="card">
+        ${conversations.length > 0 ? `
+          <table>
+            <thead><tr><th>Conversation</th><th>Messages</th><th>Channel</th><th>Action</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          ${pagination}
+        ` : '<p class="meta">No conversations yet.</p>'}
+      </div>`;
+
+    return c.html(layout('Chat History', content));
+  } catch {
+    return c.html(layout('Chat History', '<h1>Chat History</h1><p class="badge badge--red">Agent unreachable</p>'));
+  }
+});
+
+// Chat history detail page
+app.get('/chat/history/:id', async (c) => {
+  const id = c.req.param('id');
+
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/conversations/history/${encodeURIComponent(id)}`);
+    if (!res.ok) {
+      return c.html(layout('Conversation Not Found', '<h1>Conversation not found</h1><p><a href="/chat/history">&larr; Back to History</a></p>'), 404);
+    }
+
+    const data = (await res.json()) as {
+      messages: Array<{ role: string; content: string; timestamp: string }>;
+    };
+
+    const messagesHtml = data.messages
+      .map((m) => {
+        const cls = m.role === 'user' ? 'chat-msg chat-msg--user' : 'chat-msg chat-msg--assistant';
+        const label = m.role === 'user' ? 'You' : 'Jonas';
+        const timestamp = m.timestamp ? new Date(m.timestamp).toLocaleString() : '';
+        const body = m.role === 'user'
+          ? `<pre class="chat-msg__content">${m.content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`
+          : `<div class="chat-msg__content chat-md">${m.content}</div>`;
+
+        return `
+          <div class="${cls}">
+            <div class="chat-msg__label">${label} <span class="meta" style="font-weight:normal;margin-left:0.5rem">${timestamp}</span></div>
+            ${body}
+          </div>`;
+      })
+      .join('');
+
+    const content = `
+      <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+      <script>
+        if (typeof marked !== 'undefined') {
+          marked.setOptions({ breaks: true, gfm: true });
+          document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.chat-md').forEach(function(el) {
+              el.innerHTML = marked.parse(el.textContent);
+            });
+          });
+        }
+      </script>
+      <p><a href="/chat/history">&larr; Back to History</a></p>
+      <h1>Conversation</h1>
+      <div style="margin-bottom:1rem">
+        <button class="btn" onclick="window.location.href='/chat'">Continue in Chat</button>
+      </div>
+      <div class="card" style="display:flex;flex-direction:column;gap:0.75rem;max-height:70vh;overflow-y:auto">
+        ${messagesHtml || '<p class="meta">No messages in this conversation.</p>'}
+      </div>`;
+
+    return c.html(layout('Conversation', content));
+  } catch {
+    return c.html(layout('Chat History', '<h1>Error</h1><p class="badge badge--red">Could not load conversation</p><p><a href="/chat/history">&larr; Back to History</a></p>'));
   }
 });
 

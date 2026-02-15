@@ -3,56 +3,325 @@ import { layout } from '../views/layout.js';
 
 const app = new Hono();
 
+const AGENT_URL = () => process.env.AGENT_API_URL ?? 'http://localhost:3001';
+
 interface Task {
   id: string;
   name: string;
   cron: string;
   prompt: string;
-  targetChannel?: { type: string; id: string };
-  status: string;
+  targetChannelType?: string;
+  targetChannelId?: string;
   enabled: boolean;
-  lastRun?: string;
   nextRun?: string;
-  lastResult?: string;
-  createdAt: string;
+  lastRun?: string;
+  runCount?: number;
 }
 
-function renderTasks(tasks: Task[]): string {
-  if (tasks.length === 0) {
-    return '<p class="meta">No scheduled tasks.</p>';
-  }
+function parseCronDescription(cron: string): string {
+  const patterns: Record<string, string> = {
+    '0 8 * * *': 'Every day at 8:00 AM',
+    '0 9 * * 1': 'Every Monday at 9:00 AM',
+    '0 0 * * *': 'Daily at midnight',
+    '*/15 * * * *': 'Every 15 minutes',
+    '0 */1 * * *': 'Every hour',
+    '0 12 * * *': 'Every day at noon',
+  };
+  return patterns[cron] || `Cron: ${cron}`;
+}
 
-  const rows = tasks
-    .map(
-      (t) => `
-      <tr>
-        <td><strong>${t.name}</strong></td>
-        <td><code>${t.cron}</code></td>
-        <td><span class="badge ${t.enabled ? 'badge--green' : 'badge--red'}">${t.enabled ? 'active' : 'paused'}</span></td>
-        <td class="meta">${t.lastRun ? new Date(t.lastRun).toLocaleString() : '-'}</td>
-        <td class="meta">${t.nextRun ? new Date(t.nextRun).toLocaleString() : '-'}</td>
-      </tr>`
-    )
-    .join('');
+function renderTaskRow(task: Task): string {
+  const nextRun = task.nextRun ? new Date(task.nextRun).toLocaleString() : 'Not scheduled';
+  const cronDesc = parseCronDescription(task.cron);
 
   return `
+    <tr id="task-${task.id}">
+      <td>
+        <strong>${task.name}</strong><br>
+        <span class="meta">${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}</span>
+      </td>
+      <td class="meta" style="font-size:0.8rem">
+        ${cronDesc}<br>
+        <code style="font-size:0.7rem">${task.cron}</code>
+      </td>
+      <td class="meta" style="font-size:0.75rem">${nextRun}</td>
+      <td>${task.targetChannelType || 'dashboard'}</td>
+      <td>
+        <span class="badge ${task.enabled ? 'badge--green' : 'badge--red'}">
+          ${task.enabled ? '● Active' : '○ Paused'}
+        </span>
+      </td>
+      <td>
+        <div style="display:flex;gap:0.25rem;flex-wrap:wrap">
+          <button class="btn btn--sm" onclick="toggleEditForm('edit-${task.id}')">Edit</button>
+          <button class="btn btn--sm"
+            hx-post="/tasks/${task.id}/run"
+            hx-swap="none"
+            hx-on::after-request="alert(event.detail.xhr.responseText || 'Task queued for execution')">
+            Run Now
+          </button>
+          ${task.enabled
+            ? `<button class="btn btn--sm" hx-post="/tasks/${task.id}/pause" hx-target="#task-${task.id}" hx-swap="outerHTML">Pause</button>`
+            : `<button class="btn btn--sm btn--primary" hx-post="/tasks/${task.id}/resume" hx-target="#task-${task.id}" hx-swap="outerHTML">Resume</button>`
+          }
+          <button class="btn btn--sm btn--danger"
+            hx-delete="/tasks/${task.id}"
+            hx-confirm="Delete task '${task.name}'?"
+            hx-target="#task-${task.id}"
+            hx-swap="delete">
+            Delete
+          </button>
+        </div>
+      </td>
+    </tr>
+    <tr id="edit-${task.id}" class="edit-row" hidden>
+      <td colspan="6">
+        <div class="card" style="margin:0.5rem 0">
+          <h3 style="margin-bottom:0.5rem">Edit Task</h3>
+          <form hx-put="/tasks/${task.id}" hx-target="#task-${task.id}" hx-swap="outerHTML" style="display:flex;flex-direction:column;gap:0.75rem;max-width:600px">
+            <div>
+              <label class="meta" style="display:block;margin-bottom:0.25rem">Task Name</label>
+              <input type="text" name="name" value="${task.name}" required style="width:100%;max-width:none">
+            </div>
+            <div>
+              <label class="meta" style="display:block;margin-bottom:0.25rem">Cron Schedule</label>
+              <input type="text" name="cron" value="${task.cron}" required style="width:100%;max-width:none"
+                oninput="document.getElementById('cron-preview-${task.id}').textContent = parseCronDesc(this.value)">
+              <div id="cron-preview-${task.id}" class="meta" style="margin-top:0.25rem">${cronDesc}</div>
+              <div class="meta" style="margin-top:0.25rem;font-size:0.7rem">
+                Examples: <code>0 8 * * *</code> (daily 8am), <code>0 9 * * 1</code> (Mon 9am), <code>*/15 * * * *</code> (every 15min)
+              </div>
+            </div>
+            <div>
+              <label class="meta" style="display:block;margin-bottom:0.25rem">Prompt</label>
+              <textarea name="prompt" rows="4" required style="width:100%;max-width:none">${task.prompt}</textarea>
+            </div>
+            <div>
+              <label class="meta" style="display:block;margin-bottom:0.25rem">Target Channel</label>
+              <input type="text" name="targetChannelType" value="${task.targetChannelType || 'dashboard'}" style="width:100%;max-width:none">
+              <div class="meta" style="margin-top:0.25rem;font-size:0.7rem">Channel type (e.g., dashboard, matrix, telegram)</div>
+            </div>
+            <div style="display:flex;gap:0.5rem">
+              <button type="submit" class="btn btn--sm">Save Changes</button>
+              <button type="button" class="btn btn--sm" onclick="toggleEditForm('edit-${task.id}')">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </td>
+    </tr>`;
+}
+
+function renderTasksList(tasks: Task[]): string {
+  if (tasks.length === 0) {
+    return '<p class="meta">No scheduled tasks. Create one to get started.</p>';
+  }
+  return `
     <table>
-      <thead><tr><th>Task</th><th>Schedule</th><th>Status</th><th>Last Run</th><th>Next Run</th></tr></thead>
-      <tbody>${rows}</tbody>
+      <thead>
+        <tr><th>Task</th><th>Schedule</th><th>Next Run</th><th>Target</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody>${tasks.map(renderTaskRow).join('')}</tbody>
     </table>`;
 }
 
+export default app;
+
 app.get('/tasks', async (c) => {
   try {
-    const agentUrl = process.env.AGENT_API_URL ?? 'http://localhost:3001';
-    const res = await fetch(`${agentUrl}/api/tasks`);
-    const data = (await res.json()) as Task[];
-    return c.html(layout('Tasks', `<h1>Scheduled Tasks</h1>${renderTasks(data)}`));
+    const res = await fetch(`${AGENT_URL()}/api/tasks`);
+    const tasks = (await res.json()) as Task[];
+
+    const createForm = `
+      <div class="card" style="margin-bottom:1rem">
+        <button class="btn btn--sm" onclick="toggleEditForm('create-task-form')">+ New Task</button>
+        <div id="create-task-form" hidden style="margin-top:1rem">
+          <h3 style="margin-bottom:0.75rem">Create New Task</h3>
+          <form hx-post="/tasks/create"
+                hx-target="#tasks-list"
+                hx-swap="innerHTML"
+                hx-on::after-request="document.getElementById('create-task-form').setAttribute('hidden', ''); htmx.trigger('#tasks-list', 'reload')"
+                style="display:flex;flex-direction:column;gap:0.75rem;max-width:600px">
+            <div>
+              <label class="meta" style="display:block;margin-bottom:0.25rem">Task Name</label>
+              <input type="text" name="name" placeholder="Daily morning briefing" required style="width:100%;max-width:none">
+            </div>
+            <div>
+              <label class="meta" style="display:block;margin-bottom:0.25rem">Cron Schedule</label>
+              <input type="text" name="cron" placeholder="0 8 * * *" required style="width:100%;max-width:none"
+                oninput="document.getElementById('cron-preview-create').textContent = parseCronDesc(this.value)">
+              <div id="cron-preview-create" class="meta" style="margin-top:0.25rem"></div>
+              <div class="meta" style="margin-top:0.25rem;font-size:0.7rem">
+                Examples: <code>0 8 * * *</code> (daily 8am), <code>0 9 * * 1</code> (Mon 9am), <code>*/15 * * * *</code> (every 15min)
+              </div>
+            </div>
+            <div>
+              <label class="meta" style="display:block;margin-bottom:0.25rem">Prompt</label>
+              <textarea name="prompt" rows="4" placeholder="Summarize my emails and provide a morning briefing" required style="width:100%;max-width:none"></textarea>
+            </div>
+            <div>
+              <label class="meta" style="display:block;margin-bottom:0.25rem">Target Channel (optional)</label>
+              <input type="text" name="targetChannelType" placeholder="dashboard" value="dashboard" style="width:100%;max-width:none">
+              <div class="meta" style="margin-top:0.25rem;font-size:0.7rem">Channel type (e.g., dashboard, matrix, telegram)</div>
+            </div>
+            <div style="display:flex;gap:0.5rem">
+              <button type="submit" class="btn">Create Task</button>
+              <button type="button" class="btn btn--sm" onclick="toggleEditForm('create-task-form')">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+
+    const script = `
+      <script>
+        function toggleEditForm(id) {
+          var el = document.getElementById(id);
+          if (el) {
+            if (el.hasAttribute('hidden')) {
+              el.removeAttribute('hidden');
+            } else {
+              el.setAttribute('hidden', '');
+            }
+          }
+        }
+
+        function parseCronDesc(cron) {
+          var patterns = {
+            '0 8 * * *': 'Every day at 8:00 AM',
+            '0 9 * * 1': 'Every Monday at 9:00 AM',
+            '0 0 * * *': 'Daily at midnight',
+            '*/15 * * * *': 'Every 15 minutes',
+            '0 */1 * * *': 'Every hour',
+            '0 12 * * *': 'Every day at noon',
+            '0 9 * * *': 'Every day at 9:00 AM',
+            '0 17 * * *': 'Every day at 5:00 PM',
+            '0 0 * * 0': 'Every Sunday at midnight',
+            '30 8 * * 1-5': 'Weekdays at 8:30 AM'
+          };
+          return patterns[cron] || 'Cron: ' + cron;
+        }
+      </script>`;
+
+    const content = `<h1>Scheduled Tasks</h1>
+      ${createForm}
+      <div id="tasks-list">${renderTasksList(tasks)}</div>
+      ${script}`;
+
+    return c.html(layout('Tasks', content));
   } catch {
-    return c.html(
-      layout('Tasks', '<h1>Scheduled Tasks</h1><p class="badge badge--red">Agent unreachable</p>')
-    );
+    return c.html(layout('Tasks', '<h1>Scheduled Tasks</h1><p class="badge badge--red">Agent unreachable</p>'));
   }
 });
 
-export default app;
+app.post('/tasks/:id/pause', async (c) => {
+  const id = c.req.param('id');
+  try {
+    await fetch(`${AGENT_URL()}/api/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    const res = await fetch(`${AGENT_URL()}/api/tasks`);
+    const tasks = (await res.json()) as Task[];
+    const task = tasks.find(t => t.id === id);
+    if (!task) return c.text('', 204);
+    return c.html(renderTaskRow(task));
+  } catch {
+    return c.text('Error pausing task', 500);
+  }
+});
+
+app.post('/tasks/:id/resume', async (c) => {
+  const id = c.req.param('id');
+  try {
+    await fetch(`${AGENT_URL()}/api/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    });
+    const res = await fetch(`${AGENT_URL()}/api/tasks`);
+    const tasks = (await res.json()) as Task[];
+    const task = tasks.find(t => t.id === id);
+    if (!task) return c.text('', 204);
+    return c.html(renderTaskRow(task));
+  } catch {
+    return c.text('Error resuming task', 500);
+  }
+});
+
+app.delete('/tasks/:id', async (c) => {
+  const id = c.req.param('id');
+  try {
+    await fetch(`${AGENT_URL()}/api/tasks/${id}`, { method: 'DELETE' });
+    return c.text('', 200);
+  } catch {
+    return c.text('Error deleting task', 500);
+  }
+});
+
+app.post('/tasks/create', async (c) => {
+  try {
+    const body = await c.req.parseBody();
+    const taskData = {
+      name: String(body.name ?? ''),
+      cron: String(body.cron ?? ''),
+      prompt: String(body.prompt ?? ''),
+      targetChannelType: String(body.targetChannelType ?? 'dashboard'),
+      enabled: true,
+    };
+
+    await fetch(`${AGENT_URL()}/api/tasks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(taskData),
+    });
+
+    // Reload and render all tasks
+    const res = await fetch(`${AGENT_URL()}/api/tasks`);
+    const tasks = (await res.json()) as Task[];
+    return c.html(renderTasksList(tasks));
+  } catch {
+    return c.text('Error creating task', 500);
+  }
+});
+
+app.put('/tasks/:id', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const body = await c.req.parseBody();
+    const updateData = {
+      name: String(body.name ?? ''),
+      cron: String(body.cron ?? ''),
+      prompt: String(body.prompt ?? ''),
+      targetChannelType: String(body.targetChannelType ?? 'dashboard'),
+    };
+
+    await fetch(`${AGENT_URL()}/api/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updateData),
+    });
+
+    // Fetch updated task and render row
+    const res = await fetch(`${AGENT_URL()}/api/tasks`);
+    const tasks = (await res.json()) as Task[];
+    const task = tasks.find(t => t.id === id);
+    if (!task) return c.text('', 204);
+    return c.html(renderTaskRow(task));
+  } catch {
+    return c.text('Error updating task', 500);
+  }
+});
+
+app.post('/tasks/:id/run', async (c) => {
+  const id = c.req.param('id');
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/tasks/${id}/run`, { method: 'POST' });
+    if (!res.ok) {
+      const error = await res.text();
+      return c.text(`Failed to run task: ${error}`, 500);
+    }
+    return c.text('Task queued for execution', 200);
+  } catch {
+    return c.text('Error triggering task', 500);
+  }
+});

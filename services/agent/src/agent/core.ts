@@ -28,7 +28,7 @@ export class AgentCore {
   private mcpConfigPath: string;
   private skillRegistry?: SkillRegistry;
   private database?: ConversationDatabase;
-  private auditLog: AuditEntry[] = [];
+  private auditLog: AuditEntry[] = []; // Keep last 100 in memory for quick access
   private startedAt = Date.now();
   private abortControllers = new Map<string, AbortController>();
 
@@ -180,13 +180,31 @@ export class AgentCore {
       log.warn(err, 'Memory extraction failed');
     });
 
-    this.auditLog.push({
+    const auditEntry: AuditEntry = {
       id: createId('audit'),
       timestamp: isoNow(),
       action: 'chat',
       channel: channel.type,
       conversationId: session.id,
-    });
+    };
+
+    // Add to in-memory log (keep last 100)
+    this.auditLog.push(auditEntry);
+    if (this.auditLog.length > 100) {
+      this.auditLog.shift();
+    }
+
+    // Persist to database
+    if (this.database) {
+      this.database.logAudit({
+        timestamp: auditEntry.timestamp,
+        action: auditEntry.action,
+        details: JSON.stringify({ conversationId: auditEntry.conversationId }),
+        channelType: channel.type,
+        channelId: channel.id,
+        sessionKey: key,
+      });
+    }
 
     if (session.messages.length > 20) {
       session.messages = session.messages.slice(-10);

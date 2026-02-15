@@ -185,6 +185,66 @@ server.tool(
   },
 );
 
+server.tool(
+  'vault_append_daily',
+  'Append content to today\'s daily note. Creates the note if it doesn\'t exist.',
+  {
+    content: z.string().describe('Content to append'),
+    section: z.string().optional().describe('Optional section heading (e.g., "Tasks", "Notes")'),
+  },
+  async ({ content, section }) => {
+    const today = new Date().toISOString().split('T')[0];
+    const dailyPath = `daily/${today}.md`;
+    const fullPath = safePath(dailyPath);
+
+    await mkdir(dirname(fullPath), { recursive: true });
+
+    // Check if file exists
+    let existing = '';
+    try {
+      existing = await readFile(fullPath, 'utf-8');
+    } catch {
+      // Create new daily note with frontmatter
+      existing = `---
+title: Daily Note - ${today}
+tags: [daily]
+created: ${new Date().toISOString()}
+---
+
+# ${today}
+
+`;
+    }
+
+    // Append entry
+    const timestamp = new Date().toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    let entry = '\n';
+    if (section) {
+      entry += `## ${section}\n\n`;
+    } else {
+      entry += `## ${timestamp}\n\n`;
+    }
+    entry += content + '\n';
+
+    await writeFile(fullPath, existing + entry, 'utf-8');
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          path: dailyPath,
+          message: 'Entry added to daily note. Run sync script locally to pull changes.',
+        }),
+      }],
+    };
+  },
+);
+
 // --- Task scheduler tools (call agent API) ---
 
 const AGENT_API = process.env.AGENT_API_URL ?? 'http://localhost:3001';

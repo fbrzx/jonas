@@ -21,6 +21,20 @@ export interface MessageRow {
   timestamp: string;
 }
 
+export interface AuditRow {
+  id?: number;
+  timestamp: string;
+  action: string;
+  details?: string;
+  channelType?: string;
+  channelId?: string;
+  sessionKey?: string;
+  model?: string;
+  tokensUsed?: number;
+  durationMs?: number;
+  createdAt?: string;
+}
+
 export class ConversationDatabase {
   private db: Database.Database;
 
@@ -56,6 +70,25 @@ export class ConversationDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_conversation_id ON messages(conversation_id);
       CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        action TEXT NOT NULL,
+        details TEXT,
+        channel_type TEXT,
+        channel_id TEXT,
+        session_key TEXT,
+        model TEXT,
+        tokens_used INTEGER,
+        duration_ms INTEGER,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
+      CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_key);
+      CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
     `);
     log.info('Database schema initialized');
   }
@@ -122,6 +155,116 @@ export class ConversationDatabase {
     this.db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(conv.id);
     this.db.prepare('DELETE FROM conversations WHERE id = ?').run(conv.id);
     log.info({ sessionKey }, 'Conversation deleted');
+  }
+
+  // Audit log methods
+  logAudit(entry: Omit<AuditRow, 'id' | 'createdAt'>): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO audit_log (timestamp, action, details, channel_type, channel_id, session_key, model, tokens_used, duration_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      entry.timestamp,
+      entry.action,
+      entry.details ?? null,
+      entry.channelType ?? null,
+      entry.channelId ?? null,
+      entry.sessionKey ?? null,
+      entry.model ?? null,
+      entry.tokensUsed ?? null,
+      entry.durationMs ?? null,
+    );
+  }
+
+  getAuditLogs(options: {
+    limit?: number;
+    offset?: number;
+    action?: string;
+    from?: string;
+    to?: string;
+    sessionKey?: string;
+  } = {}): AuditRow[] {
+    const { limit = 100, offset = 0, action, from, to, sessionKey } = options;
+
+    let query = `
+      SELECT id, timestamp, action, details, channel_type as channelType,
+             channel_id as channelId, session_key as sessionKey, model,
+             tokens_used as tokensUsed, duration_ms as durationMs, created_at as createdAt
+      FROM audit_log
+      WHERE 1=1
+    `;
+
+    const params: any[] = [];
+
+    if (action) {
+      query += ' AND action = ?';
+      params.push(action);
+    }
+
+    if (sessionKey) {
+      query += ' AND session_key = ?';
+      params.push(sessionKey);
+    }
+
+    if (from) {
+      query += ' AND timestamp >= ?';
+      params.push(from);
+    }
+
+    if (to) {
+      query += ' AND timestamp <= ?';
+      params.push(to);
+    }
+
+    query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+
+    return this.db.prepare(query).all(...params) as AuditRow[];
+  }
+
+  getAuditCount(options: {
+    action?: string;
+    from?: string;
+    to?: string;
+    sessionKey?: string;
+  } = {}): number {
+    const { action, from, to, sessionKey } = options;
+
+    let query = 'SELECT COUNT(*) as count FROM audit_log WHERE 1=1';
+    const params: any[] = [];
+
+    if (action) {
+      query += ' AND action = ?';
+      params.push(action);
+    }
+
+    if (sessionKey) {
+      query += ' AND session_key = ?';
+      params.push(sessionKey);
+    }
+
+    if (from) {
+      query += ' AND timestamp >= ?';
+      params.push(from);
+    }
+
+    if (to) {
+      query += ' AND timestamp <= ?';
+      params.push(to);
+    }
+
+    const result = this.db.prepare(query).get(...params) as { count: number };
+    return result.count;
+  }
+
+  cleanOldAudit(daysToKeep = 90): number {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+    const cutoff = cutoffDate.toISOString();
+
+    const result = this.db.prepare('DELETE FROM audit_log WHERE timestamp < ?').run(cutoff);
+    log.info({ deleted: result.changes, daysToKeep }, 'Cleaned old audit entries');
+    return result.changes;
   }
 
   close(): void {

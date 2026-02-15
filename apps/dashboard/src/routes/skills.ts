@@ -405,8 +405,11 @@ function renderSkillDetail(skill: Skill, connections: Connection[], channels: Pl
   const id = encodeURIComponent(skill.dirName);
   const configJson = skill.config ? JSON.stringify(skill.config, null, 2) : '{}';
 
-  // Filter connections to only show ones for this skill
-  const skillConnections = connections.filter((conn) => conn.skillDirName === skill.dirName);
+  // Filter connections to only show required OAuth connections for this skill
+  const oauthKeys = new Set(Object.keys(skill.config?.oauth ?? {}));
+  const skillConnections = connections.filter(
+    (conn) => conn.skillDirName === skill.dirName && oauthKeys.has(conn.secretKey)
+  );
 
   return `
     <p><a href="/skills">&larr; Back to Skills</a></p>
