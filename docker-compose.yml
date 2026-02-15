@@ -12,6 +12,7 @@ services:
       - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-claude-sonnet-4-5-20250929}
       - AGENT_MAX_ACTIONS_PER_MINUTE=${AGENT_MAX_ACTIONS_PER_MINUTE:-30}
       - VAULT_PATH=/data/vault
+      - DB_PATH=/data/conversations.db
       - SKILLS_ENCRYPTION_KEY=${SKILLS_ENCRYPTION_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # Model provider configuration

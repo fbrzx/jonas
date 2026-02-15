@@ -14,6 +14,7 @@ import { SkillRegistry } from './skills/registry.js';
 import { SkillCryptoStore } from './skills/crypto-store.js';
 import { OAuthProviderStore } from './oauth/provider-store.js';
 import { OAuthHandler } from './oauth/handler.js';
+import { ConversationDatabase } from './storage/database.js';
 
 const log = createLogger('jonas');
 
@@ -71,8 +72,12 @@ async function main() {
   const provider = ProviderFactory.create(providerConfig, claudeBin, mcpConfigPath);
   log.info({ provider: provider.getName() }, 'Model provider initialized');
 
+  // Initialize conversation database
+  const dbPath = process.env.DB_PATH ?? '/data/conversations.db';
+  const database = new ConversationDatabase(dbPath);
+
   // Initialize agent core
-  const agent = new AgentCore({ retriever, extractor, provider, mcpConfigPath, skillRegistry });
+  const agent = new AgentCore({ retriever, extractor, provider, mcpConfigPath, skillRegistry, database });
 
   // Initialize task scheduler
   const scheduler = new TaskScheduler({
@@ -86,7 +91,7 @@ async function main() {
   log.info('Task scheduler started');
 
   // Start internal API server
-  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler });
+  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler, database });
   const port = Number(process.env.AGENT_PORT ?? 3001);
 
   const { serve } = await import('@hono/node-server');
@@ -100,6 +105,7 @@ async function main() {
   const shutdown = async () => {
     log.info('Shutting down...');
     scheduler.stop();
+    database.close();
     process.exit(0);
   };
   process.on('SIGTERM', shutdown);

@@ -9,6 +9,7 @@ import type { TaskScheduler } from '../tasks/scheduler.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { OAuthProviderStore } from '../oauth/provider-store.js';
 import type { OAuthHandler } from '../oauth/handler.js';
+import type { ConversationDatabase } from '../storage/database.js';
 import { ProviderFactory } from '../agent/providers/factory.js';
 import type { ProviderConfig } from '../agent/providers/base.js';
 
@@ -22,6 +23,7 @@ interface ApiDeps {
   skillRegistry?: SkillRegistry;
   oauthProviderStore?: OAuthProviderStore;
   oauthHandler?: OAuthHandler;
+  database?: ConversationDatabase;
 }
 
 export function createApiServer(deps: ApiDeps) {
@@ -236,9 +238,23 @@ export function createApiServer(deps: ApiDeps) {
     });
   });
 
-  // Conversations
+  // Conversations (in-memory)
   app.get('/api/conversations', (c) => {
     return c.json(deps.agent.getConversations());
+  });
+
+  // Conversation history (database)
+  app.get('/api/conversations/history', (c) => {
+    if (!deps.database) return c.json({ error: 'Database not available' }, 503);
+    const limit = Number(c.req.query('limit') ?? 50);
+    return c.json(deps.database.listConversations(limit));
+  });
+
+  app.get('/api/conversations/history/:id', (c) => {
+    if (!deps.database) return c.json({ error: 'Database not available' }, 503);
+    const id = c.req.param('id');
+    const messages = deps.database.getConversationMessages(id);
+    return c.json({ id, messages });
   });
 
   // Audit log

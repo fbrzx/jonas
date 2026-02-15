@@ -7,6 +7,7 @@ import type { MemoryRetriever } from '../memory/retriever.js';
 import type { MemoryExtractor } from '../memory/extractor.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { ModelProvider } from './providers/base.js';
+import type { ConversationDatabase } from '../storage/database.js';
 
 const log = createLogger('agent-core');
 
@@ -16,6 +17,7 @@ export interface AgentCoreOptions {
   provider: ModelProvider;
   mcpConfigPath: string;
   skillRegistry?: SkillRegistry;
+  database?: ConversationDatabase;
 }
 
 export class AgentCore {
@@ -25,6 +27,7 @@ export class AgentCore {
   private provider: ModelProvider;
   private mcpConfigPath: string;
   private skillRegistry?: SkillRegistry;
+  private database?: ConversationDatabase;
   private auditLog: AuditEntry[] = [];
   private startedAt = Date.now();
   private abortControllers = new Map<string, AbortController>();
@@ -35,6 +38,7 @@ export class AgentCore {
     this.provider = opts.provider;
     this.mcpConfigPath = opts.mcpConfigPath;
     this.skillRegistry = opts.skillRegistry;
+    this.database = opts.database;
   }
 
   get uptime(): number {
@@ -62,6 +66,24 @@ export class AgentCore {
   ): Promise<string> {
     const key = sessionKey ?? `${channel.type}:${channel.id}`;
     const session = this.sessions.getOrCreate(key);
+
+    // Load conversation history from database if this is a new session
+    if (this.database && session.messages.length === 0) {
+      const stored = this.database.getConversation(key);
+      if (stored) {
+        session.id = stored.conv.id;
+        session.createdAt = stored.conv.createdAt;
+        session.messages = stored.messages.map(m => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          channel,
+          conversationId: m.conversationId,
+          timestamp: m.timestamp,
+        }));
+        log.info({ sessionKey: key, messageCount: session.messages.length }, 'Loaded conversation from database');
+      }
+    }
 
     const memories = await this.retriever.retrieve(userMessage);
     const skillPrompts = this.skillRegistry?.getEnabledPrompts();
@@ -122,6 +144,37 @@ export class AgentCore {
       timestamp: isoNow(),
     };
     session.messages.push(assistantMsg);
+
+    // Save to database
+    if (this.database) {
+      try {
+        session.updatedAt = isoNow();
+        this.database.saveConversation({
+          id: session.id,
+          sessionKey: key,
+          channelType: channel.type,
+          channelId: channel.id,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+        });
+        this.database.saveMessage({
+          id: userMsg.id,
+          conversationId: session.id,
+          role: userMsg.role,
+          content: userMsg.content,
+          timestamp: userMsg.timestamp,
+        });
+        this.database.saveMessage({
+          id: assistantMsg.id,
+          conversationId: session.id,
+          role: assistantMsg.role,
+          content: assistantMsg.content,
+          timestamp: assistantMsg.timestamp,
+        });
+      } catch (err) {
+        log.warn(err, 'Failed to save conversation to database');
+      }
+    }
 
     this.extractor.extractFromTurn(userMessage, fullResponse).catch((err) => {
       log.warn(err, 'Memory extraction failed');
@@ -197,5 +250,12 @@ export class AgentCore {
 
   resetSession(sessionKey: string): void {
     this.sessions.reset(sessionKey);
+    if (this.database) {
+      try {
+        this.database.deleteConversation(sessionKey);
+      } catch (err) {
+        log.warn(err, 'Failed to delete conversation from database');
+      }
+    }
   }
 }
