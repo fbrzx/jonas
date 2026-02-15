@@ -6,6 +6,30 @@ const app = new Hono();
 
 const AGENT_URL = () => process.env.AGENT_API_URL ?? 'http://localhost:3001';
 
+interface PairingStatus {
+  required: boolean;
+  paired: boolean;
+  pairedAt?: string;
+  challengeExpiresAt?: string;
+}
+
+function channelPairingType(name: string): string {
+  return `channel:${name}`;
+}
+
+async function fetchChannel(name: string): Promise<PlatformChannel | null> {
+  const res = await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}`);
+  if (!res.ok) return null;
+  return res.json() as Promise<PlatformChannel>;
+}
+
+async function fetchPairingStatus(name: string): Promise<PairingStatus | null> {
+  const channelType = channelPairingType(name);
+  const res = await fetch(`${AGENT_URL()}/api/pairing/status?channelType=${encodeURIComponent(channelType)}`);
+  if (!res.ok) return null;
+  return res.json() as Promise<PairingStatus>;
+}
+
 // --- Helper functions ---
 
 function renderChannels(channels: PlatformChannel[]): string {
@@ -112,7 +136,47 @@ function renderConfigSection(channel: PlatformChannel): string {
   return html;
 }
 
-function renderChannelDetail(channel: PlatformChannel): string {
+function renderPairingSection(channel: PlatformChannel, pairing: PairingStatus | null, pairingMessage?: string): string {
+  if (!pairing) {
+    return '<p class="meta">Pairing status unavailable.</p>';
+  }
+
+  const pairingType = channelPairingType(channel.dirName);
+  const statusBadge = pairing.paired
+    ? '<span class="badge badge--green">paired</span>'
+    : '<span class="badge badge--red">not paired</span>';
+
+  return `
+    <p class="meta">Pairing ID: <code>${pairingType}</code></p>
+    <p style="margin-top:0.5rem">Status: ${statusBadge}</p>
+    ${pairing.required ? '<p class="meta" style="margin-top:0.5rem">Pairing is required before this channel can deliver chat to the agent.</p>' : ''}
+    ${pairing.pairedAt ? `<p class="meta" style="margin-top:0.5rem">Paired at: ${pairing.pairedAt}</p>` : ''}
+    ${pairing.challengeExpiresAt ? `<p class="meta" style="margin-top:0.5rem">Current challenge expires at: ${pairing.challengeExpiresAt}</p>` : ''}
+    ${pairingMessage ? `<p style="margin-top:0.75rem" class="badge badge--blue">${pairingMessage}</p>` : ''}
+
+    <div style="margin-top:1rem;max-width:860px;display:flex;flex-direction:column;gap:0.75rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;flex-wrap:wrap">
+        <form method="post" action="/channels/${encodeURIComponent(channel.dirName)}/pairing/init" style="margin:0">
+          <button type="submit" class="btn btn--sm">Generate Pairing Code</button>
+        </form>
+
+        <form method="post" action="/channels/${encodeURIComponent(channel.dirName)}/pairing/revoke" style="margin:0">
+          <button type="submit" class="btn btn--sm btn--danger">Revoke</button>
+        </form>
+      </div>
+
+      <form method="post" action="/channels/${encodeURIComponent(channel.dirName)}/pairing/confirm" style="display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:0.75rem;align-items:end">
+        <div>
+          <label class="meta" for="pairing-code">Code</label>
+          <input id="pairing-code" name="code" type="text" placeholder="6-digit code" required style="max-width:none;width:100%">
+        </div>
+        <button type="submit" class="btn btn--sm">Confirm</button>
+      </form>
+    </div>
+  `;
+}
+
+function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | null, pairingMessage?: string): string {
   const id = encodeURIComponent(channel.dirName);
   const configJson = channel.config ? JSON.stringify(channel.config, null, 2) : '{}';
 
@@ -182,6 +246,11 @@ function renderChannelDetail(channel: PlatformChannel): string {
       ${renderConfigSection(channel)}
     </div>
 
+    <div class="card" style="margin-top:1.5rem">
+      <h2>Pairing</h2>
+      ${renderPairingSection(channel, pairing, pairingMessage)}
+    </div>
+
     <details style="margin-top:1.5rem">
       <summary class="meta" style="cursor:pointer">View config.json</summary>
       <pre style="margin-top:0.5rem;padding:0.75rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow-x:auto"><code>${configJson}</code></pre>
@@ -230,13 +299,17 @@ app.get('/channels', async (c) => {
 
 app.get('/channels/:name', async (c) => {
   const name = c.req.param('name');
+  const pairingMessage = c.req.query('pairingMessage') ?? '';
   try {
-    const res = await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}`);
-    if (!res.ok) {
+    const [channel, pairing] = await Promise.all([
+      fetchChannel(name),
+      fetchPairingStatus(name),
+    ]);
+
+    if (!channel) {
       return c.html(layout('Channel Not Found', '<h1>Channel Not Found</h1><p><a href="/channels">&larr; Back to Channels</a></p>'));
     }
-    const channel = (await res.json()) as PlatformChannel;
-    return c.html(layout(channel.metadata.name, renderChannelDetail(channel)));
+    return c.html(layout(channel.metadata.name, renderChannelDetail(channel, pairing, pairingMessage)));
   } catch {
     return c.html(
       layout('Error', '<h1>Error</h1><p class="badge badge--red">Agent unreachable</p>'),
@@ -365,6 +438,72 @@ app.post('/channels/import', async (c) => {
   }
 
   return c.redirect('/channels');
+});
+
+app.post('/channels/:name/pairing/init', async (c) => {
+  const name = c.req.param('name');
+  const channelType = channelPairingType(name);
+
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/pairing/init`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelType }),
+    });
+    const data = await res.json() as { code?: string; expiresAt?: string; error?: string };
+    const message = res.ok && data.code
+      ? `Pairing code: ${data.code} (expires ${data.expiresAt})`
+      : (data.error ?? 'Failed to initialize pairing');
+    return c.redirect(`/channels/${encodeURIComponent(name)}?pairingMessage=${encodeURIComponent(message)}`);
+  } catch {
+    return c.redirect(`/channels/${encodeURIComponent(name)}?pairingMessage=${encodeURIComponent('Agent unreachable')}`);
+  }
+});
+
+app.post('/channels/:name/pairing/confirm', async (c) => {
+  const name = c.req.param('name');
+  const channelType = channelPairingType(name);
+  const body = await c.req.parseBody();
+  const code = String(body.code ?? '').trim();
+
+  if (!code) {
+    return c.redirect(`/channels/${encodeURIComponent(name)}?pairingMessage=${encodeURIComponent('Missing code')}`);
+  }
+
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/pairing/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelType, code }),
+    });
+    const data = await res.json() as { error?: string };
+    const message = res.ok
+      ? 'Pairing confirmed'
+      : (data.error ?? 'Failed to confirm pairing');
+    return c.redirect(`/channels/${encodeURIComponent(name)}?pairingMessage=${encodeURIComponent(message)}`);
+  } catch {
+    return c.redirect(`/channels/${encodeURIComponent(name)}?pairingMessage=${encodeURIComponent('Agent unreachable')}`);
+  }
+});
+
+app.post('/channels/:name/pairing/revoke', async (c) => {
+  const name = c.req.param('name');
+  const channelType = channelPairingType(name);
+
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/pairing/revoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelType }),
+    });
+    const data = await res.json() as { error?: string };
+    const message = res.ok
+      ? 'Pairing revoked'
+      : (data.error ?? 'Failed to revoke pairing');
+    return c.redirect(`/channels/${encodeURIComponent(name)}?pairingMessage=${encodeURIComponent(message)}`);
+  } catch {
+    return c.redirect(`/channels/${encodeURIComponent(name)}?pairingMessage=${encodeURIComponent('Agent unreachable')}`);
+  }
 });
 
 export default app;

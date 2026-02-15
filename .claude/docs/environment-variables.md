@@ -29,11 +29,11 @@ This document lists all environment variables used by the Jonas agent.
 
 ### Gateway
 - `GATEWAY_PORT` - WebSocket gateway port (default: `18789`)
-- `GATEWAY_TOKEN` - Authentication token for gateway access (required)
+- `GATEWAY_TOKEN` - Shared secret for WebSocket gateway upgrades via `/ws?token=...` (required). Missing/invalid token rejects connections.
 
 ### Dashboard
 - `DASHBOARD_PORT` - Dashboard HTTP port (default: `3000`)
-- `DASHBOARD_AUTH_TOKEN` - Dashboard authentication token (required)
+- `DASHBOARD_TOKEN` - Dashboard authentication token (required). If unset, dashboard access is blocked.
 
 ### Telegram Bot
 - `TELEGRAM_BOT_TOKEN` - Telegram bot token from @BotFather (required)

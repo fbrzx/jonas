@@ -279,6 +279,23 @@ app.post('/chat/stream', async (c) => {
       body: JSON.stringify(body),
     });
 
+    if (agentRes.status === 403) {
+      let message = 'Channel pairing required. Configure pairing in Channels.';
+      try {
+        const data = await agentRes.json() as { error?: string; pairingRequired?: boolean };
+        if (data?.pairingRequired) {
+          message = `${data.error ?? 'Channel pairing required'}. Configure pairing in Channels.`;
+        }
+      } catch {
+        // Keep default message
+      }
+
+      return new Response(
+        `event: error\ndata: ${JSON.stringify({ error: message })}\n\n`,
+        { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } },
+      );
+    }
+
     if (!agentRes.ok || !agentRes.body) {
       return new Response(
         `event: error\ndata: ${JSON.stringify({ error: `Agent returned ${agentRes.status}` })}\n\n`,

@@ -14,7 +14,7 @@ import { SessionManager } from './session-manager.js';
 const log = createLogger('gateway');
 
 const AGENT_BASE_URL =
-  process.env.AGENT_BASE_URL ?? 'http://agent:3001';
+  process.env.AGENT_BASE_URL ?? process.env.AGENT_API_URL ?? 'http://agent:3001';
 
 export function createGatewayServer(port: number) {
   const sessions = new SessionManager();
@@ -90,7 +90,7 @@ export function createGatewayServer(port: number) {
     try {
       switch (frame.method) {
         case 'chat.send':
-          await handleChatSend(ws, frame, sessionKey);
+          await handleChatSend(ws, wsId, frame, sessionKey);
           break;
         case 'chat.abort':
           await handleChatAbort(ws, frame, sessionKey);
@@ -151,6 +151,7 @@ function handleHttpRequest(
  */
 async function handleChatSend(
   ws: WebSocket,
+  wsId: string,
   frame: GatewayRequest,
   sessionKey: string,
 ) {
@@ -162,7 +163,13 @@ async function handleChatSend(
   const res = await fetch(`${AGENT_BASE_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, channel, sessionKey }),
+    body: JSON.stringify({
+      message,
+      channel,
+      sessionKey,
+      channelType: 'gateway',
+      channelId: wsId,
+    }),
   });
 
   if (!res.ok) {
@@ -262,7 +269,7 @@ async function handleSessionsReset(
   frame: GatewayRequest,
   sessionKey: string,
 ) {
-  const res = await fetch(`${AGENT_BASE_URL}/api/sessions/reset`, {
+  const res = await fetch(`${AGENT_BASE_URL}/api/chat/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionKey }),

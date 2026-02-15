@@ -16,6 +16,7 @@ import { OAuthProviderStore } from './oauth/provider-store.js';
 import { OAuthHandler } from './oauth/handler.js';
 import { ConversationDatabase } from './storage/database.js';
 import { ChannelRegistry } from './channels/registry.js';
+import { ChannelPairingService } from './channels/pairing.js';
 
 const log = createLogger('jonas');
 
@@ -84,6 +85,11 @@ async function main() {
   const oauthHandler = new OAuthHandler({ providerStore: oauthProviderStore, skillRegistry });
   log.info('OAuth provider store loaded');
 
+  // Initialize channel pairing service
+  const pairingService = new ChannelPairingService();
+  await pairingService.load();
+  log.info('Channel pairing service loaded');
+
   // Load model provider configuration and create provider
   const modelConfigPath = '/data/model-config.json';
   const providerConfig = await ProviderFactory.loadConfig(modelConfigPath);
@@ -109,7 +115,7 @@ async function main() {
   log.info('Task scheduler started');
 
   // Start internal API server
-  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler, database, channelRegistry });
+  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler, database, channelRegistry, pairingService });
   const port = Number(process.env.AGENT_PORT ?? 3001);
 
   const { serve } = await import('@hono/node-server');

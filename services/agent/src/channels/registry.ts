@@ -272,9 +272,9 @@ export class ChannelRegistry {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message,
-            channelType: channel.dirName,
+            channelType: `channel:${channel.dirName}`,
             channelId,
-            sessionKey: `${channel.dirName}:${channelId}`,
+            sessionKey: `channel:${channel.dirName}:${channelId}`,
           }),
         });
 

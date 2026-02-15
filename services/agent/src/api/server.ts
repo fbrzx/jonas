@@ -13,6 +13,7 @@ import type { ConversationDatabase } from '../storage/database.js';
 import type { ChannelRegistry } from '../channels/registry.js';
 import { ProviderFactory } from '../agent/providers/factory.js';
 import type { ProviderConfig } from '../agent/providers/base.js';
+import type { ChannelPairingService } from '../channels/pairing.js';
 
 const log = createLogger('api');
 
@@ -26,12 +27,66 @@ interface ApiDeps {
   oauthHandler?: OAuthHandler;
   database?: ConversationDatabase;
   channelRegistry?: ChannelRegistry;
+  pairingService?: ChannelPairingService;
 }
 
 export function createApiServer(deps: ApiDeps) {
   const app = new Hono();
 
   app.use('*', cors({ origin: '*' }));
+
+  // --- Channel pairing endpoints ---
+
+  app.get('/api/pairing/status', (c) => {
+    if (!deps.pairingService) return c.json({ error: 'Pairing service not available' }, 503);
+
+    const channelType = c.req.query('channelType');
+    if (!channelType) {
+      return c.json({ error: 'Missing channelType query parameter' }, 400);
+    }
+
+    return c.json(deps.pairingService.getStatus(channelType));
+  });
+
+  app.post('/api/pairing/init', async (c) => {
+    if (!deps.pairingService) return c.json({ error: 'Pairing service not available' }, 503);
+
+    const { channelType } = await c.req.json<{ channelType?: string }>();
+    if (!channelType) {
+      return c.json({ error: 'Missing required field: channelType' }, 400);
+    }
+
+    const pairing = await deps.pairingService.init(channelType);
+    return c.json(pairing);
+  });
+
+  app.post('/api/pairing/confirm', async (c) => {
+    if (!deps.pairingService) return c.json({ error: 'Pairing service not available' }, 503);
+
+    const { channelType, code } = await c.req.json<{ channelType?: string; code?: string }>();
+    if (!channelType || !code) {
+      return c.json({ error: 'Missing required fields: channelType, code' }, 400);
+    }
+
+    const ok = await deps.pairingService.confirm(channelType, code);
+    if (!ok) {
+      return c.json({ error: 'Invalid or expired pairing code' }, 400);
+    }
+
+    return c.json({ success: true, channelType, paired: true });
+  });
+
+  app.post('/api/pairing/revoke', async (c) => {
+    if (!deps.pairingService) return c.json({ error: 'Pairing service not available' }, 503);
+
+    const { channelType } = await c.req.json<{ channelType?: string }>();
+    if (!channelType) {
+      return c.json({ error: 'Missing required field: channelType' }, 400);
+    }
+
+    await deps.pairingService.revoke(channelType);
+    return c.json({ success: true, channelType, paired: false });
+  });
 
   // Health / status
   app.get('/api/status', async (c) => {
@@ -105,7 +160,13 @@ export function createApiServer(deps: ApiDeps) {
 
       const response = await fetch(`${baseUrl}/api/tags`);
       if (!response.ok) {
-        return c.json({ error: `Ollama API error (${response.status})` }, response.status);
+        return new Response(
+          JSON.stringify({ error: `Ollama API error (${response.status})` }),
+          {
+            status: response.status,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
       }
 
       const data = await response.json() as { models: Array<{ name: string; size: number; modified_at: string }> };
@@ -139,6 +200,17 @@ export function createApiServer(deps: ApiDeps) {
       id: body.channelId ?? 'api',
     };
 
+    if (
+      deps.pairingService?.isRequired(channel.type)
+      && !deps.pairingService.isPaired(channel.type)
+    ) {
+      return c.json({
+        error: `Channel "${channel.type}" is not paired`,
+        pairingRequired: true,
+        channelType: channel.type,
+      }, 403);
+    }
+
     try {
       const response = await deps.agent.chat(
         body.message,
@@ -165,6 +237,17 @@ export function createApiServer(deps: ApiDeps) {
       type: (body.channelType ?? 'dashboard') as 'api' | 'gateway' | 'dashboard',
       id: body.channelId ?? 'dashboard',
     };
+
+    if (
+      deps.pairingService?.isRequired(channel.type)
+      && !deps.pairingService.isPaired(channel.type)
+    ) {
+      return c.json({
+        error: `Channel "${channel.type}" is not paired`,
+        pairingRequired: true,
+        channelType: channel.type,
+      }, 403);
+    }
 
     return new Response(
       new ReadableStream({
