@@ -1,12 +1,11 @@
 const NAV_ITEMS = [
   { href: '/', label: 'Status' },
-  { href: '/audit', label: 'Audit' },
-  { href: '/model', label: 'Model' },
   { href: '/chat', label: 'Chat' },
   { href: '/memory', label: 'Memory' },
   { href: '/skills', label: 'Skills' },
   { href: '/channels', label: 'Channels' },
   { href: '/tasks', label: 'Tasks' },
+  { href: '/audit', label: 'Audit' },
 ];
 
 const instanceInfo = process.env.DOMAIN || '';
