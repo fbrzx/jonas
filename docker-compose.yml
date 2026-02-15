@@ -68,28 +68,6 @@ services:
     depends_on:
       - agent
 
-  telegram-bot:
-    build:
-      context: .
-      dockerfile: services/telegram-bot/Dockerfile
-    restart: unless-stopped
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_MODE=${TELEGRAM_MODE:-webhook}  # webhook or polling
-      - TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL:-}
-      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
-      - TELEGRAM_POLL_INTERVAL=${TELEGRAM_POLL_INTERVAL:-1000}
-      - TELEGRAM_BOT_PORT=3002
-      - AGENT_API_URL=http://agent:3001
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-    ports:
-      - "3002:3002"
-    networks:
-      - internal
-      - public
-    depends_on:
-      - agent
-
   qdrant:
     image: qdrant/qdrant:latest
     restart: unless-stopped

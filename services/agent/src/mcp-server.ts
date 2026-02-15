@@ -621,6 +621,157 @@ server.tool(
   },
 );
 
+// --- Channel tools ---
+
+server.tool(
+  'channel_create',
+  `Create a new communication channel. A channel is a directory in /data/channels/ containing:
+- channel.md: YAML frontmatter (name, platform, version, author, mode) + markdown description
+- config.json: declares required/optional secrets and channel configuration
+- handler.js: Node.js ES module implementing the ChannelHandler interface
+
+Channels enable Jonas to connect to communication platforms (Telegram, Slack, Discord, WhatsApp, etc.).
+
+channel.md structure:
+---
+name: Platform Name
+platform: platform-id
+version: 1.0.0
+author: your-name
+mode: webhook|polling|both
+---
+
+# Channel Description
+
+config.json structure:
+{
+  "requiredSecrets": ["PLATFORM_TOKEN"],
+  "optionalSecrets": ["WEBHOOK_SECRET"],
+  "mode": "webhook",
+  "port": 3003
+}
+
+handler.js must export an initialize function:
+export async function initialize(config, secrets, sendToAgent) {
+  return {
+    start: async () => { /* start webhook or polling */ },
+    stop: async () => { /* cleanup */ },
+    send: async (channelId, text) => { /* send message */ }
+  };
+}
+
+After creating, use channel_set_value to configure required secrets, then enable and start the channel via dashboard.`,
+  {
+    dirName: z.string().describe('Directory name for the channel (lowercase, hyphens, e.g., "slack")'),
+    channelMd: z.string().describe('Full content of channel.md including YAML frontmatter (---\\nname: ...\\nplatform: ...\\n---) and markdown description'),
+    configJson: z.string().optional().describe('JSON string for config.json, e.g., {"requiredSecrets":["SLACK_BOT_TOKEN"],"mode":"webhook","port":3003}'),
+    handlerJs: z.string().optional().describe('JavaScript source code for handler.js (ES module implementing ChannelHandler interface)'),
+  },
+  async ({ dirName, channelMd, configJson, handlerJs }) => {
+    const body: Record<string, unknown> = {
+      dirName,
+      metadata: {} as Record<string, unknown>,
+    };
+
+    // Parse channel.md frontmatter
+    const match = channelMd.match(/^---\n([\s\S]+?)\n---/);
+    if (match) {
+      const yaml = match[1];
+      const lines = yaml.split('\n');
+      for (const line of lines) {
+        const [key, ...valueParts] = line.split(':');
+        if (key && valueParts.length) {
+          const value = valueParts.join(':').trim();
+          (body.metadata as Record<string, string>)[key.trim()] = value;
+        }
+      }
+    }
+
+    if (configJson) {
+      try { body.config = JSON.parse(configJson); } catch { body.config = undefined; }
+    }
+
+    const res = await fetch(`${AGENT_API}/api/channels`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json() as { error?: string; dirName?: string; metadata?: { name?: string }; config?: { requiredSecrets?: string[] } };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to create channel' }) }], isError: true };
+    }
+
+    // Write handler.js if provided
+    if (handlerJs) {
+      try {
+        await writeFile(`/data/channels/${dirName}/handler.js`, handlerJs);
+      } catch (err) {
+        return { content: [{ type: 'text', text: JSON.stringify({ error: 'Failed to write handler.js' }) }], isError: true };
+      }
+    }
+
+    // Build helpful next steps message
+    const dashboardUrl = process.env.DASHBOARD_URL ?? 'http://localhost:3000';
+    const channelUrl = `${dashboardUrl}/channels/${encodeURIComponent(data.dirName ?? 'unknown')}`;
+    const hasConfig = data.config?.requiredSecrets && data.config.requiredSecrets.length > 0;
+
+    let nextSteps = `Channel "${data.metadata?.name ?? 'Unknown'}" created successfully!`;
+
+    if (hasConfig) {
+      nextSteps += `\n\n⚠️ This channel requires configuration before it can be used.`;
+      nextSteps += `\n\nPlease visit the dashboard to configure the required secrets:`;
+      nextSteps += `\n${channelUrl}`;
+      nextSteps += `\n\nRequired secrets: ${data.config.requiredSecrets.join(', ')}`;
+      nextSteps += `\n\nAlternatively, use the channel_set_value tool to configure the channel via chat.`;
+    } else {
+      nextSteps += `\n\nThe channel is ready to use. Configure and enable it from: ${channelUrl}`;
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          channel: data,
+          message: nextSteps,
+        }, null, 2)
+      }]
+    };
+  },
+);
+
+server.tool(
+  'channel_set_value',
+  'Set a secret value (like bot token or API key) for a channel. Used to provide credentials the channel needs.',
+  {
+    name: z.string().describe('Channel directory name'),
+    key: z.string().describe('Secret key (e.g., "TELEGRAM_BOT_TOKEN")'),
+    value: z.string().describe('Value to store (will be encrypted)'),
+  },
+  async ({ name, key, value }) => {
+    const res = await fetch(`${AGENT_API}/api/channels/${encodeURIComponent(name)}/values`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json() as { error?: string };
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to set value' }) }], isError: true };
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          message: `Set ${key} for channel "${name}". The value is encrypted and stored securely.`
+        })
+      }]
+    };
+  },
+);
+
 // Start
 const transport = new StdioServerTransport();
 await server.connect(transport);

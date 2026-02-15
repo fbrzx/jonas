@@ -15,6 +15,7 @@ import { SkillCryptoStore } from './skills/crypto-store.js';
 import { OAuthProviderStore } from './oauth/provider-store.js';
 import { OAuthHandler } from './oauth/handler.js';
 import { ConversationDatabase } from './storage/database.js';
+import { ChannelRegistry } from './channels/registry.js';
 
 const log = createLogger('jonas');
 
@@ -60,6 +61,23 @@ async function main() {
   await skillRegistry.load();
   log.info({ skills: skillRegistry.list().length }, 'Skill registry loaded');
 
+  // Initialize channel registry
+  const channelRegistry = new ChannelRegistry(skillCrypto);
+  await channelRegistry.load();
+  log.info({ channels: channelRegistry.list().length }, 'Channel registry loaded');
+
+  // Auto-start enabled channels
+  for (const channel of channelRegistry.list()) {
+    if (channel.status === 'enabled') {
+      try {
+        await channelRegistry.startChannel(channel.dirName);
+        log.info({ channel: channel.dirName }, 'Channel started');
+      } catch (err) {
+        log.error({ channel: channel.dirName, err }, 'Failed to start channel');
+      }
+    }
+  }
+
   // Initialize OAuth
   const oauthProviderStore = new OAuthProviderStore(skillCrypto);
   await oauthProviderStore.load();
@@ -91,7 +109,7 @@ async function main() {
   log.info('Task scheduler started');
 
   // Start internal API server
-  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler, database });
+  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler, database, channelRegistry });
   const port = Number(process.env.AGENT_PORT ?? 3001);
 
   const { serve } = await import('@hono/node-server');
@@ -104,6 +122,14 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     log.info('Shutting down...');
+
+    // Stop all running channels
+    for (const channel of channelRegistry.list()) {
+      if (channel.state === 'running') {
+        await channelRegistry.stopChannel(channel.dirName).catch(() => {});
+      }
+    }
+
     scheduler.stop();
     database.close();
     process.exit(0);

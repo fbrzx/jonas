@@ -11,3 +11,11 @@ export type {
   GatewayMethod,
   ChatEventPayload,
 } from './gateway.js';
+export type {
+  PlatformChannel,
+  ChannelMetadata,
+  ChannelStatus,
+  ChannelState,
+  ChannelConfig,
+  ChannelHandler,
+} from './channel.js';

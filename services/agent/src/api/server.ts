@@ -10,6 +10,7 @@ import type { SkillRegistry } from '../skills/registry.js';
 import type { OAuthProviderStore } from '../oauth/provider-store.js';
 import type { OAuthHandler } from '../oauth/handler.js';
 import type { ConversationDatabase } from '../storage/database.js';
+import type { ChannelRegistry } from '../channels/registry.js';
 import { ProviderFactory } from '../agent/providers/factory.js';
 import type { ProviderConfig } from '../agent/providers/base.js';
 
@@ -24,6 +25,7 @@ interface ApiDeps {
   oauthProviderStore?: OAuthProviderStore;
   oauthHandler?: OAuthHandler;
   database?: ConversationDatabase;
+  channelRegistry?: ChannelRegistry;
 }
 
 export function createApiServer(deps: ApiDeps) {
@@ -456,6 +458,159 @@ export function createApiServer(deps: ApiDeps) {
       log.error(err, 'Failed to import skill');
       const msg = err instanceof Error ? err.message : 'Failed to import skill';
       return c.json({ error: msg }, 400);
+    }
+  });
+
+  // --- Channel endpoints ---
+
+  app.get('/api/channels', (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    return c.json(deps.channelRegistry.list());
+  });
+
+  app.get('/api/channels/:name', (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    const channel = deps.channelRegistry.get(name);
+    if (!channel) return c.json({ error: 'Channel not found' }, 404);
+    return c.json(channel);
+  });
+
+  app.post('/api/channels', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    try {
+      const { dirName, metadata, config } = await c.req.json();
+      const channel = await deps.channelRegistry.create(dirName, metadata, config);
+      return c.json(channel, 201);
+    } catch (err) {
+      log.error(err, 'Failed to create channel');
+      const msg = err instanceof Error ? err.message : 'Failed to create channel';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  app.post('/api/channels/:name/enable', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    await deps.channelRegistry.enable(name);
+    return c.json({ success: true });
+  });
+
+  app.post('/api/channels/:name/disable', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    await deps.channelRegistry.disable(name);
+    return c.json({ success: true });
+  });
+
+  app.post('/api/channels/:name/start', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    try {
+      await deps.channelRegistry.startChannel(name);
+      return c.json({ success: true });
+    } catch (err) {
+      log.error(err, 'Failed to start channel');
+      const msg = err instanceof Error ? err.message : 'Failed to start channel';
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  app.post('/api/channels/:name/stop', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    try {
+      await deps.channelRegistry.stopChannel(name);
+      return c.json({ success: true });
+    } catch (err) {
+      log.error(err, 'Failed to stop channel');
+      const msg = err instanceof Error ? err.message : 'Failed to stop channel';
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  app.put('/api/channels/:name/values', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    const { key, value } = await c.req.json();
+    await deps.channelRegistry.setChannelValue(name, key, value);
+    return c.json({ success: true });
+  });
+
+  app.delete('/api/channels/:name/values/:key', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    const key = c.req.param('key');
+    await deps.channelRegistry.deleteChannelValue(name, key);
+    return c.json({ success: true });
+  });
+
+  app.delete('/api/channels/:name', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    try {
+      await deps.channelRegistry.delete(name);
+      return c.json({ success: true });
+    } catch (err) {
+      log.error(err, 'Failed to delete channel');
+      const msg = err instanceof Error ? err.message : 'Failed to delete channel';
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  app.get('/api/channels/:name/export', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    const zipBuffer = await deps.channelRegistry.exportChannel(name);
+    if (!zipBuffer) return c.json({ error: 'Channel not found' }, 404);
+
+    const filename = `${name}.zip`;
+    return new Response(zipBuffer, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    });
+  });
+
+  app.post('/api/channels/import', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+
+    try {
+      const body = await c.req.parseBody();
+      const file = body.file;
+
+      if (!file || typeof file === 'string') {
+        return c.json({ error: 'No file uploaded' }, 400);
+      }
+
+      // Read file buffer
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      const overwrite = body.overwrite === 'true';
+      const channel = await deps.channelRegistry.importChannel(buffer, overwrite);
+
+      return c.json({ success: true, channel }, 201);
+    } catch (err) {
+      log.error(err, 'Failed to import channel');
+      const msg = err instanceof Error ? err.message : 'Failed to import channel';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  app.post('/api/channels/:name/send', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    try {
+      const { channelId, text } = await c.req.json();
+      await deps.channelRegistry.sendMessage(name, channelId, text);
+      return c.json({ success: true });
+    } catch (err) {
+      log.error(err, 'Failed to send message');
+      const msg = err instanceof Error ? err.message : 'Failed to send message';
+      return c.json({ error: msg }, 500);
     }
   });
 

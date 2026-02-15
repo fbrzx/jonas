@@ -10,6 +10,7 @@ import tasksRoutes from './routes/tasks.js';
 import auditRoutes from './routes/audit.js';
 import chatRoutes from './routes/chat.js';
 import oauthRoutes from './routes/oauth.js';
+import channelsRoutes from './routes/channels.js';
 
 const log = createLogger('dashboard');
 const app = new Hono();
@@ -22,6 +23,7 @@ app.route('/', chatRoutes);
 app.route('/', statusRoutes);
 app.route('/', memoryRoutes);
 app.route('/', skillsRoutes);
+app.route('/', channelsRoutes);
 app.route('/model', modelRoutes);
 app.route('/', vaultRoutes);
 app.route('/', tasksRoutes);
