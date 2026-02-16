@@ -21,17 +21,8 @@ interface Skill {
   status: 'enabled' | 'disabled';
   hasTools: boolean;
   hasPrompt: boolean;
-  config?: { requiredSecrets?: string[]; oauth?: Record<string, OAuthFlowConfig> };
+  config?: { requiredSecrets?: string[]; oauth?: Record<string, OAuthFlowConfig>; requiredChannels?: string[] };
   secretKeys?: string[];
-}
-
-interface Connection {
-  skillDirName: string;
-  skillName: string;
-  secretKey: string;
-  provider: string;
-  connected: boolean;
-  scopes: string[];
 }
 
 interface PlatformChannel {
@@ -46,53 +37,6 @@ interface PlatformChannel {
 
 // --- List page ---
 
-function renderConnectionsTable(connections: Connection[]): string {
-  if (connections.length === 0) {
-    return '<p class="meta">No OAuth connections configured across skills.</p>';
-  }
-
-  const rows = connections
-    .map((conn) => {
-      const skillUrl = `/skills/${encodeURIComponent(conn.skillDirName)}`;
-      const connectParams = new URLSearchParams({
-        provider: conn.provider,
-        scopes: conn.scopes.join(','),
-      });
-      const connectUrl = `/oauth/connect/${encodeURIComponent(conn.skillDirName)}/${encodeURIComponent(conn.secretKey)}?${connectParams.toString()}`;
-
-      let actionHtml: string;
-      if (conn.connected) {
-        actionHtml = `
-          <a href="${connectUrl}" class="btn btn--sm">Reconnect</a>
-          <button class="btn btn--sm btn--danger"
-            hx-post="/skills/${encodeURIComponent(conn.skillDirName)}/values/${encodeURIComponent(conn.secretKey)}/delete"
-            hx-target="body"
-            hx-swap="none"
-            hx-on::after-request="location.reload()"
-            hx-confirm="Disconnect ${conn.provider} from ${conn.skillName}?"
-          >Disconnect</button>`;
-      } else {
-        actionHtml = `<a href="${skillUrl}" class="btn btn--sm">Setup</a>`;
-      }
-
-      return `
-        <tr>
-          <td><a href="${skillUrl}"><strong>${conn.skillName}</strong></a></td>
-          <td><code>${conn.secretKey}</code></td>
-          <td>${conn.provider}</td>
-          <td><span class="badge ${conn.connected ? 'badge--green' : 'badge--red'}">${conn.connected ? 'connected' : 'not connected'}</span></td>
-          <td style="display:flex;gap:0.5rem">${actionHtml}</td>
-        </tr>`;
-    })
-    .join('');
-
-  return `
-    <table>
-      <thead><tr><th>Skill</th><th>Key</th><th>Provider</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
-
 function renderSkills(skills: Skill[]): string {
   if (skills.length === 0) {
     return '<p class="meta">No skills installed. Add skill directories to <code>/data/skills/</code>.</p>';
@@ -103,7 +47,6 @@ function renderSkills(skills: Skill[]): string {
       (s) => `
       <tr>
         <td><a href="/skills/${encodeURIComponent(s.dirName)}"><strong>${s.metadata.name}</strong></a><br><span class="meta">${s.metadata.description}</span></td>
-        <td><code>${s.metadata.version}</code></td>
         <td>
           ${s.hasPrompt ? '<span class="badge badge--blue">prompt</span> ' : ''}
           ${s.hasTools ? '<span class="badge badge--blue">tools</span>' : ''}
@@ -125,7 +68,7 @@ function renderSkills(skills: Skill[]): string {
 
   return `
     <table>
-      <thead><tr><th>Skill</th><th>Version</th><th>Capabilities</th><th>Status</th><th>Action</th></tr></thead>
+      <thead><tr><th>Skill</th><th>Capabilities</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -135,7 +78,6 @@ function renderSkillRow(s: Skill): string {
   return `
     <tr>
       <td><a href="/skills/${id}"><strong>${s.metadata.name}</strong></a><br><span class="meta">${s.metadata.description}</span></td>
-      <td><code>${s.metadata.version}</code></td>
       <td>
         ${s.hasPrompt ? '<span class="badge badge--blue">prompt</span> ' : ''}
         ${s.hasTools ? '<span class="badge badge--blue">tools</span>' : ''}
@@ -210,206 +152,182 @@ function renderConfigSection(skill: Skill): string {
     (k) => !oauthKeyNames.has(k),
   );
 
-  const hasOAuth = oauthEntries.length > 0;
-  const hasConfig = configKeys.length > 0;
-
-  if (!hasOAuth && !hasConfig) {
+  if (configKeys.length === 0) {
     return '<p class="meta">This skill requires no configuration.</p>';
   }
 
-  let html = '';
+  let html = '<h2>Configuration</h2>';
 
-  // --- OAuth connections ---
-  if (hasOAuth) {
-    html += '<h2>Connections</h2>';
-    const oauthRows = oauthEntries
-      .map(([key, flow]) => {
-        const tokenStored = allVaultKeys.includes(key);
-        const credsStored = allVaultKeys.includes(`__oauth_${key}_client_id`);
+  const configRows = configKeys
+    .map((key) => {
+      const isSet = userKeys.includes(key);
+      const actionHtml = isSet
+        ? `<button class="btn btn--sm btn--danger"
+             hx-post="/skills/${id}/values/${encodeURIComponent(key)}/delete"
+             hx-target="#config-section" hx-swap="innerHTML"
+           >Remove</button>`
+        : '';
+      return `
+        <tr>
+          <td><code>${key}</code></td>
+          <td><span class="badge ${isSet ? 'badge--green' : 'badge--red'}">${isSet ? 'set' : 'missing'}</span></td>
+          <td>${actionHtml}</td>
+        </tr>`;
+    })
+    .join('');
 
-        let statusBadge: string;
-        let actionHtml: string;
+  html += `
+    <table>
+      <thead><tr><th>Key</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>${configRows}</tbody>
+    </table>`;
 
-        if (tokenStored) {
-          // Connected — token is stored, agent can use this
-          statusBadge = '<span class="badge badge--green">connected</span>';
-          actionHtml = `
-            <button class="btn btn--sm btn--danger"
-              hx-post="/skills/${id}/values/${encodeURIComponent(key)}/delete"
-              hx-target="#config-section" hx-swap="innerHTML"
-            >Disconnect</button>`;
-        } else if (credsStored) {
-          // Credentials saved, ready to connect
-          const connectParams = new URLSearchParams({
-            provider: flow.provider,
-            scopes: flow.scopes.join(','),
-          });
-          statusBadge = '<span class="badge badge--yellow">ready to connect</span>';
-          actionHtml = `
-            <a href="/oauth/connect/${encodeURIComponent(skill.dirName)}/${encodeURIComponent(key)}?${connectParams.toString()}"
-               class="btn btn--sm">Connect ${flow.provider}</a>`;
-        } else {
-          // No credentials yet — need setup
-          statusBadge = '<span class="badge badge--red">needs setup</span>';
-          actionHtml = `
-            <button class="btn btn--sm"
-              onclick="this.closest('tr').nextElementSibling.toggleAttribute('hidden')"
-            >Setup ${flow.provider}</button>`;
-        }
+  const unsetKeys = configKeys.filter((k) => !userKeys.includes(k));
+  const options = unsetKeys.map((k) => `<option value="${k}">${k}</option>`).join('');
 
-        // Inline setup panel (hidden by default, shown when "Setup" clicked)
-        const setupPanel = `
-          <tr class="setup-panel" hidden>
-            <td colspan="4">
-              <div class="card" style="margin:0.5rem 0">
-                <p class="meta" style="margin-bottom:0.5rem">
-                  1. Go to the <strong>${flow.provider}</strong> developer console and create an OAuth app<br>
-                  2. Set redirect URI to: <code>http://localhost:3000/oauth/callback</code><br>
-                  3. Paste the credentials below
-                </p>
-                <form method="post" action="/skills/${id}/oauth-setup/${encodeURIComponent(key)}"
-                      style="display:flex;flex-direction:column;gap:0.5rem;max-width:400px">
-                  <label class="meta">Client ID</label>
-                  <input type="text" name="clientId" required placeholder="your-client-id">
-                  <label class="meta">Client Secret</label>
-                  <input type="text" name="clientSecret" required placeholder="your-client-secret">
-                  <button type="submit" class="btn" style="align-self:flex-start">Save &amp; Connect</button>
-                </form>
-              </div>
-            </td>
-          </tr>`;
-
-        return `
-          <tr>
-            <td><code>${key}</code></td>
-            <td>${flow.provider}</td>
-            <td>${statusBadge}</td>
-            <td>${actionHtml}</td>
-          </tr>
-          ${tokenStored ? '' : credsStored ? '' : setupPanel}`;
-      })
-      .join('');
-
-    html += `
-      <table>
-        <thead><tr><th>Key</th><th>Provider</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>${oauthRows}</tbody>
-      </table>`;
-  }
-
-  // --- API keys / config values ---
-  if (hasConfig) {
-    html += `<h2 style="margin-top:1.5rem">Configuration</h2>`;
-
-    const configRows = configKeys
-      .map((key) => {
-        const isSet = userKeys.includes(key);
-        const actionHtml = isSet
-          ? `<button class="btn btn--sm btn--danger"
-               hx-post="/skills/${id}/values/${encodeURIComponent(key)}/delete"
-               hx-target="#config-section" hx-swap="innerHTML"
-             >Remove</button>`
-          : '';
-        return `
-          <tr>
-            <td><code>${key}</code></td>
-            <td><span class="badge ${isSet ? 'badge--green' : 'badge--red'}">${isSet ? 'set' : 'missing'}</span></td>
-            <td>${actionHtml}</td>
-          </tr>`;
-      })
-      .join('');
-
-    html += `
-      <table>
-        <thead><tr><th>Key</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>${configRows}</tbody>
-      </table>`;
-
-    const unsetKeys = configKeys.filter((k) => !userKeys.includes(k));
-    const options = unsetKeys.map((k) => `<option value="${k}">${k}</option>`).join('');
-
-    html += `
-      <div style="margin-top:1rem">
-        <form hx-post="/skills/${id}/values"
-              hx-target="#config-section" hx-swap="innerHTML"
-              style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
-          <label class="meta">Key</label>
-          <div style="display:flex;gap:0.5rem">
-            <select name="key" style="flex:1" required>
-              <option value="">Select a key…</option>
-              ${options}
-            </select>
-            <input type="text" name="customKey" placeholder="or type custom key" style="flex:1;max-width:none">
-          </div>
-          <label class="meta">Value</label>
-          <textarea name="value" placeholder="Paste value here…" required></textarea>
-          <button type="submit" class="btn" style="align-self:flex-start">Save</button>
-        </form>
-      </div>`;
-  }
+  html += `
+    <div style="margin-top:1rem">
+      <form hx-post="/skills/${id}/values"
+            hx-target="#config-section" hx-swap="innerHTML"
+            style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
+        <label class="meta">Key</label>
+        <div style="display:flex;gap:0.5rem">
+          <select name="key" style="flex:1" required>
+            <option value="">Select a key…</option>
+            ${options}
+          </select>
+          <input type="text" name="customKey" placeholder="or type custom key" style="flex:1;max-width:none">
+        </div>
+        <label class="meta">Value</label>
+        <textarea name="value" placeholder="Paste value here…" required></textarea>
+        <button type="submit" class="btn" style="align-self:flex-start">Save</button>
+      </form>
+    </div>`;
 
   return html;
 }
 
-function renderRequiredChannels(skill: Skill, allChannels: PlatformChannel[]): string {
+function renderRequirements(skill: Skill, allChannels: PlatformChannel[]): string {
+  const id = encodeURIComponent(skill.dirName);
   const requiredChannels = skill.config?.requiredChannels ?? [];
+  const oauthEntries = Object.entries(skill.config?.oauth ?? {});
+  const allVaultKeys = skill.secretKeys ?? [];
 
-  if (requiredChannels.length === 0) {
+  if (requiredChannels.length === 0 && oauthEntries.length === 0) {
     return '';
   }
 
-  const rows = requiredChannels.map((channelType) => {
-    // Extract channel name from format like "channel:telegram" -> "telegram"
+  let rows = '';
+
+  // Channel requirements
+  for (const channelType of requiredChannels) {
     const channelName = channelType.startsWith('channel:') ? channelType.slice(8) : channelType;
     const channel = allChannels.find((ch) => ch.dirName === channelName);
 
     if (!channel) {
-      return `
+      rows += `
         <tr>
           <td><code>${channelType}</code></td>
+          <td><span class="badge">channel</span></td>
           <td><span class="badge badge--red">not installed</span></td>
-          <td>-</td>
           <td><a href="/channels" class="btn btn--sm">Go to Channels</a></td>
         </tr>`;
+    } else {
+      const isReady = channel.status === 'enabled' && channel.state === 'running';
+      const statusBadge = isReady
+        ? '<span class="badge badge--green">ready</span>'
+        : channel.status === 'disabled'
+        ? '<span class="badge badge--red">disabled</span>'
+        : channel.state === 'error'
+        ? '<span class="badge badge--red">error</span>'
+        : '<span class="badge badge--yellow">not running</span>';
+
+      rows += `
+        <tr>
+          <td><a href="/channels/${encodeURIComponent(channel.dirName)}"><strong>${channel.metadata.name}</strong></a></td>
+          <td><span class="badge">${channel.metadata.platform}</span></td>
+          <td>${statusBadge}</td>
+          <td><a href="/channels/${encodeURIComponent(channel.dirName)}" class="btn btn--sm">Configure</a></td>
+        </tr>`;
+    }
+  }
+
+  // OAuth requirements
+  for (const [key, flow] of oauthEntries) {
+    const tokenStored = allVaultKeys.includes(key);
+    const credsStored = allVaultKeys.includes(`__oauth_${key}_client_id`);
+
+    let statusBadge: string;
+    let actionHtml: string;
+
+    if (tokenStored) {
+      statusBadge = '<span class="badge badge--green">connected</span>';
+      actionHtml = `
+        <button class="btn btn--sm btn--danger"
+          hx-post="/skills/${id}/values/${encodeURIComponent(key)}/delete"
+          hx-target="#requirements-section" hx-swap="innerHTML"
+        >Disconnect</button>`;
+    } else if (credsStored) {
+      const connectParams = new URLSearchParams({
+        provider: flow.provider,
+        scopes: flow.scopes.join(','),
+      });
+      statusBadge = '<span class="badge badge--yellow">ready to connect</span>';
+      actionHtml = `
+        <a href="/oauth/connect/${encodeURIComponent(skill.dirName)}/${encodeURIComponent(key)}?${connectParams.toString()}"
+           class="btn btn--sm">Connect</a>`;
+    } else {
+      statusBadge = '<span class="badge badge--red">needs setup</span>';
+      actionHtml = `
+        <button class="btn btn--sm"
+          onclick="this.closest('tr').nextElementSibling.toggleAttribute('hidden')"
+        >Setup</button>`;
     }
 
-    const isReady = channel.status === 'enabled' && channel.state === 'running';
-    const statusBadge = isReady
-      ? '<span class="badge badge--green">ready</span>'
-      : channel.status === 'disabled'
-      ? '<span class="badge badge--red">disabled</span>'
-      : channel.state === 'error'
-      ? '<span class="badge badge--red">error</span>'
-      : '<span class="badge badge--yellow">not running</span>';
+    const setupPanel = !tokenStored && !credsStored ? `
+      <tr class="setup-panel" hidden>
+        <td colspan="4">
+          <div class="card" style="margin:0.5rem 0">
+            <p class="meta" style="margin-bottom:0.5rem">
+              1. Go to the <strong>${flow.provider}</strong> developer console and create an OAuth app<br>
+              2. Set redirect URI to: <code>http://localhost:3000/oauth/callback</code><br>
+              3. Paste the credentials below
+            </p>
+            <form method="post" action="/skills/${id}/oauth-setup/${encodeURIComponent(key)}"
+                  style="display:flex;flex-direction:column;gap:0.5rem;max-width:400px">
+              <label class="meta">Client ID</label>
+              <input type="text" name="clientId" required placeholder="your-client-id">
+              <label class="meta">Client Secret</label>
+              <input type="text" name="clientSecret" required placeholder="your-client-secret">
+              <button type="submit" class="btn" style="align-self:flex-start">Save &amp; Connect</button>
+            </form>
+          </div>
+        </td>
+      </tr>` : '';
 
-    return `
+    rows += `
       <tr>
-        <td><a href="/channels/${encodeURIComponent(channel.dirName)}"><strong>${channel.metadata.name}</strong></a></td>
+        <td><code>${key}</code></td>
+        <td><span class="badge badge--blue">${flow.provider}</span></td>
         <td>${statusBadge}</td>
-        <td>${channel.metadata.platform}</td>
-        <td><a href="/channels/${encodeURIComponent(channel.dirName)}" class="btn btn--sm">Configure</a></td>
-      </tr>`;
-  }).join('');
+        <td>${actionHtml}</td>
+      </tr>
+      ${setupPanel}`;
+  }
 
   return `
-    <h2 style="margin-top:2rem">Required Channels</h2>
-    <div class="card">
+    <h2 style="margin-top:2rem">Requirements</h2>
+    <div class="card" id="requirements-section">
       <table>
-        <thead><tr><th>Channel</th><th>Status</th><th>Platform</th><th>Action</th></tr></thead>
+        <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
 }
 
-function renderSkillDetail(skill: Skill, connections: Connection[], channels: PlatformChannel[]): string {
+function renderSkillDetail(skill: Skill, channels: PlatformChannel[]): string {
   const id = encodeURIComponent(skill.dirName);
   const configJson = skill.config ? JSON.stringify(skill.config, null, 2) : '{}';
-
-  // Filter connections to only show required OAuth connections for this skill
-  const oauthKeys = new Set(Object.keys(skill.config?.oauth ?? {}));
-  const skillConnections = connections.filter(
-    (conn) => conn.skillDirName === skill.dirName && oauthKeys.has(conn.secretKey)
-  );
 
   return `
     <p><a href="/skills">&larr; Back to Skills</a></p>
@@ -469,32 +387,23 @@ function renderSkillDetail(skill: Skill, connections: Connection[], channels: Pl
       ${renderConfigSection(skill)}
     </div>
 
-    ${renderRequiredChannels(skill, channels)}
-
-    ${skillConnections.length > 0 ? `
-      <h2 style="margin-top:2rem">OAuth Connections</h2>
-      <div class="card">
-        ${renderConnectionsTable(skillConnections)}
-      </div>
-    ` : ''}`;
+    ${renderRequirements(skill, channels)}`;
 }
 
 app.get('/skills/:id', async (c) => {
   const id = c.req.param('id');
   try {
-    const [skillRes, connectionsRes, channelsRes] = await Promise.all([
+    const [skillRes, channelsRes] = await Promise.all([
       fetch(`${AGENT_URL()}/api/skills/${encodeURIComponent(id)}`),
-      fetch(`${AGENT_URL()}/api/connections`),
       fetch(`${AGENT_URL()}/api/channels`),
     ]);
 
     if (!skillRes.ok) return c.html(layout('Skill Not Found', '<h1>Skill not found</h1>'), 404);
 
     const skill = (await skillRes.json()) as Skill;
-    const connections = connectionsRes.ok ? ((await connectionsRes.json()) as Connection[]) : [];
     const channels = channelsRes.ok ? ((await channelsRes.json()) as PlatformChannel[]) : [];
 
-    return c.html(layout(skill.metadata.name, renderSkillDetail(skill, connections, channels)));
+    return c.html(layout(skill.metadata.name, renderSkillDetail(skill, channels)));
   } catch {
     return c.html(
       layout('Skills', '<h1>Skills</h1><p class="badge badge--red">Agent unreachable</p>'),

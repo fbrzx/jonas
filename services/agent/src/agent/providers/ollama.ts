@@ -77,7 +77,7 @@ export class OllamaProvider implements ModelProvider {
         throw new Error(`Ollama API error (${response.status}): ${errorText}`);
       }
 
-      const data: OllamaChatResponse = await response.json();
+      const data = (await response.json()) as OllamaChatResponse;
 
       if (!data.message?.content) {
         log.error({ data }, 'Unexpected Ollama response format');

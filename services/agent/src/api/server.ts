@@ -687,6 +687,21 @@ export function createApiServer(deps: ApiDeps) {
     return c.json({ success: true });
   });
 
+  app.put('/api/channels/:name/config', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    try {
+      const config = await c.req.json();
+      const updated = await deps.channelRegistry.updateConfig(name, config);
+      if (!updated) return c.json({ error: 'Channel not found' }, 404);
+      return c.json({ success: true });
+    } catch (err) {
+      log.error(err, 'Failed to update channel config');
+      const msg = err instanceof Error ? err.message : 'Failed to update config';
+      return c.json({ error: msg }, 500);
+    }
+  });
+
   app.delete('/api/channels/:name', async (c) => {
     if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
     const name = c.req.param('name');

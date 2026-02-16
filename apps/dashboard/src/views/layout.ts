@@ -123,6 +123,8 @@ export function layout(title: string, content: string): string {
     select:focus, textarea:focus { outline: none; border-color: #58a6ff; }
     textarea { width: 100%; min-height: 80px; resize: vertical; }
     .badge--blue { background: #1f6feb33; color: #58a6ff; }
+    a { color: #58a6ff; }
+    a:visited { color: #58a6ff; }
     a.row-link { text-decoration: none; color: inherit; }
     a.row-link:hover td { background: #1f293744; }
     .htmx-indicator { opacity: 0; transition: opacity 0.2s; }

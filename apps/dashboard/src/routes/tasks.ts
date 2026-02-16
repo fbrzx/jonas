@@ -32,6 +32,15 @@ function parseCronDescription(cron: string): string {
   return patterns[cron] || `Cron: ${cron}`;
 }
 
+function formatResult(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw);
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return raw;
+  }
+}
+
 function renderTaskRow(task: Task): string {
   const nextRun = task.nextRun ? new Date(task.nextRun).toLocaleString() : 'Not scheduled';
   const lastRun = task.lastRun ? new Date(task.lastRun).toLocaleString() : 'Never';
@@ -58,16 +67,16 @@ function renderTaskRow(task: Task): string {
         <strong>Next:</strong> ${nextRun}<br>
         <strong>Last:</strong> ${lastRun}
       </td>
-      <td>${task.targetChannelType || 'dashboard'}</td>
-      <td>
+      <td class="meta" style="font-size:0.75rem">${task.targetChannelType || 'dashboard'}</td>
+      <td style="white-space:nowrap">
         <span class="badge ${task.enabled ? 'badge--green' : 'badge--red'}">
           ${task.enabled ? '● Active' : '○ Paused'}
-        </span><br>
+        </span>
         <div style="margin-top:0.25rem">${statusBadge}</div>
-        ${task.lastResult ? `<details style="margin-top:0.25rem"><summary class="meta" style="cursor:pointer;font-size:0.7rem">Last result</summary><pre style="font-size:0.65rem;margin-top:0.25rem;max-height:100px;overflow:auto">${task.lastResult}</pre></details>` : ''}
+        ${task.lastResult ? `<button class="btn btn--sm" style="margin-top:0.25rem;font-size:0.65rem;padding:0.15rem 0.4rem" onclick="document.getElementById('result-${task.id}').toggleAttribute('hidden')">Last result</button>` : ''}
       </td>
-      <td>
-        <div style="display:flex;gap:0.25rem;flex-wrap:wrap">
+      <td style="white-space:nowrap">
+        <div style="display:flex;gap:0.25rem">
           <button class="btn btn--sm" onclick="toggleEditForm('edit-${task.id}')">Edit</button>
           <button class="btn btn--sm"
             hx-post="/tasks/${task.id}/run"
@@ -75,6 +84,8 @@ function renderTaskRow(task: Task): string {
             hx-on::after-request="alert(event.detail.xhr.responseText || 'Task queued for execution')">
             Run Now
           </button>
+        </div>
+        <div style="display:flex;gap:0.25rem;margin-top:0.25rem">
           ${task.enabled
             ? `<button class="btn btn--sm" hx-post="/tasks/${task.id}/pause" hx-target="#task-${task.id}" hx-swap="outerHTML">Pause</button>`
             : `<button class="btn btn--sm btn--primary" hx-post="/tasks/${task.id}/resume" hx-target="#task-${task.id}" hx-swap="outerHTML">Resume</button>`
@@ -123,7 +134,19 @@ function renderTaskRow(task: Task): string {
           </form>
         </div>
       </td>
-    </tr>`;
+    </tr>
+    ${task.lastResult ? `
+    <tr id="result-${task.id}" hidden>
+      <td colspan="6">
+        <div class="card" style="margin:0.5rem 0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+            <span class="meta">Last result</span>
+            <button class="btn btn--sm" style="font-size:0.65rem;padding:0.15rem 0.4rem" onclick="document.getElementById('result-${task.id}').toggleAttribute('hidden')">Close</button>
+          </div>
+          <pre style="font-size:0.8rem;padding:0.75rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow-x:auto;max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"><code>${formatResult(task.lastResult)}</code></pre>
+        </div>
+      </td>
+    </tr>` : ''}`;
 }
 
 function renderTasksList(tasks: Task[]): string {
@@ -238,7 +261,7 @@ app.post('/tasks/:id/pause', async (c) => {
     const res = await fetch(`${AGENT_URL()}/api/tasks`);
     const tasks = (await res.json()) as Task[];
     const task = tasks.find(t => t.id === id);
-    if (!task) return c.text('', 204);
+    if (!task) return c.body(null, 204);
     return c.html(renderTaskRow(task));
   } catch {
     return c.text('Error pausing task', 500);
@@ -256,7 +279,7 @@ app.post('/tasks/:id/resume', async (c) => {
     const res = await fetch(`${AGENT_URL()}/api/tasks`);
     const tasks = (await res.json()) as Task[];
     const task = tasks.find(t => t.id === id);
-    if (!task) return c.text('', 204);
+    if (!task) return c.body(null, 204);
     return c.html(renderTaskRow(task));
   } catch {
     return c.text('Error resuming task', 500);
@@ -320,7 +343,7 @@ app.put('/tasks/:id', async (c) => {
     const res = await fetch(`${AGENT_URL()}/api/tasks`);
     const tasks = (await res.json()) as Task[];
     const task = tasks.find(t => t.id === id);
-    if (!task) return c.text('', 204);
+    if (!task) return c.body(null, 204);
     return c.html(renderTaskRow(task));
   } catch {
     return c.text('Error updating task', 500);

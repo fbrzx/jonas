@@ -10,9 +10,9 @@ import type {
   ChannelState,
   ChannelConfig,
   ChannelHandler,
-} from '@jonas/shared';
+} from '@jonas/shared/types';
 import { createLogger } from '@jonas/shared/utils';
-import type { CryptoStore } from '../skills/crypto-store.js';
+import type { SkillCryptoStore } from '../skills/crypto-store.js';
 
 const log = createLogger('channels');
 
@@ -25,9 +25,9 @@ export class ChannelRegistry {
   private handlers = new Map<string, ChannelHandler>();
   private readonly channelsDir: string;
   private readonly stateFile: string;
-  private readonly cryptoStore: CryptoStore;
+  private readonly cryptoStore: SkillCryptoStore;
 
-  constructor(cryptoStore: CryptoStore, dataDir = '/data') {
+  constructor(cryptoStore: SkillCryptoStore, dataDir = '/data') {
     this.channelsDir = join(dataDir, 'channels');
     this.stateFile = join(dataDir, 'channels.json');
     this.cryptoStore = cryptoStore;
@@ -278,7 +278,7 @@ export class ChannelRegistry {
           }),
         });
 
-        const data = await response.json();
+        const data = (await response.json()) as { response?: string };
         return data.response ?? 'No response';
       } catch (err) {
         log.error({ err, channel: channel.dirName }, 'Failed to send to agent');
@@ -319,6 +319,16 @@ export class ChannelRegistry {
     this.channels.set(name, channel);
 
     log.info({ channel: name, key }, 'Channel value deleted');
+  }
+
+  async updateConfig(name: string, config: ChannelConfig): Promise<boolean> {
+    const channel = this.channels.get(name);
+    if (!channel) return false;
+    const configPath = join(channel.filePath, 'config.json');
+    await writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    channel.config = config;
+    log.info({ channel: name }, 'Channel config updated');
+    return true;
   }
 
   async delete(name: string): Promise<void> {

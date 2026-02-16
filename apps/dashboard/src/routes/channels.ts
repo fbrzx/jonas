@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { layout } from '../views/layout.js';
-import type { PlatformChannel } from '@jonas/shared';
+import type { PlatformChannel } from '@jonas/shared/types';
 
 const app = new Hono();
 
@@ -11,6 +11,15 @@ interface PairingStatus {
   paired: boolean;
   pairedAt?: string;
   challengeExpiresAt?: string;
+}
+
+interface Connection {
+  skillDirName: string;
+  skillName: string;
+  secretKey: string;
+  provider: string;
+  connected: boolean;
+  scopes: string[];
 }
 
 function channelPairingType(name: string): string {
@@ -183,7 +192,7 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
   return `
     <p><a href="/channels">&larr; Back to Channels</a></p>
     <h1>${channel.metadata.name}</h1>
-    <p class="meta" style="margin-bottom:1.5rem">${channel.metadata.description || 'No description'}</p>
+    <p class="meta" style="margin-bottom:1.5rem">${channel.metadata.description}</p>
 
     <div class="card" style="margin-bottom:1.5rem">
       <dl style="display:grid;grid-template-columns:120px 1fr;gap:0.5rem">
@@ -251,19 +260,109 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
       ${renderPairingSection(channel, pairing, pairingMessage)}
     </div>
 
-    <details style="margin-top:1.5rem">
-      <summary class="meta" style="cursor:pointer">View config.json</summary>
-      <pre style="margin-top:0.5rem;padding:0.75rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow-x:auto"><code>${configJson}</code></pre>
-    </details>
+    <div style="margin-top:1.5rem">
+      <button class="btn btn--sm" onclick="document.getElementById('config-editor').toggleAttribute('hidden')">
+        Edit config.json
+      </button>
+    </div>
+    <div id="config-editor" hidden style="margin-top:1rem">
+      <div class="card">
+        <h3 style="margin-bottom:0.5rem">Edit config.json</h3>
+        <form hx-put="/channels/${id}/config"
+              hx-target="#config-editor-result"
+              style="display:flex;flex-direction:column;gap:0.5rem">
+          <textarea name="config" rows="12" style="font-family:monospace;font-size:0.9em" required>${configJson}</textarea>
+          <div style="display:flex;gap:0.5rem">
+            <button type="submit" class="btn btn--sm">Save</button>
+            <button type="button" class="btn btn--sm" onclick="document.getElementById('config-editor').toggleAttribute('hidden')">Cancel</button>
+          </div>
+        </form>
+        <div id="config-editor-result"></div>
+      </div>
+    </div>
   `;
+}
+
+function renderOAuthConnections(connections: Connection[]): string {
+  if (connections.length === 0) {
+    return '<p class="meta">No OAuth connections configured.</p>';
+  }
+
+  const rows = connections
+    .map((conn) => {
+      const skillUrl = `/skills/${encodeURIComponent(conn.skillDirName)}`;
+      const connectParams = new URLSearchParams({
+        provider: conn.provider,
+        scopes: conn.scopes.join(','),
+      });
+      const connectUrl = `/oauth/connect/${encodeURIComponent(conn.skillDirName)}/${encodeURIComponent(conn.secretKey)}?${connectParams.toString()}`;
+
+      let actionHtml: string;
+      let setupPanel = '';
+      if (conn.connected) {
+        actionHtml = `
+          <a href="${connectUrl}" class="btn btn--sm">Reconnect</a>
+          <button class="btn btn--sm btn--danger"
+            hx-post="/skills/${encodeURIComponent(conn.skillDirName)}/values/${encodeURIComponent(conn.secretKey)}/delete"
+            hx-target="body" hx-swap="none"
+            hx-on::after-request="location.reload()"
+            hx-confirm="Disconnect ${conn.provider} from ${conn.skillName}?"
+          >Disconnect</button>`;
+      } else {
+        actionHtml = `
+          <button class="btn btn--sm"
+            onclick="this.closest('tr').nextElementSibling.toggleAttribute('hidden')"
+          >Setup ${conn.provider}</button>`;
+        setupPanel = `
+          <tr class="setup-panel" hidden>
+            <td colspan="4">
+              <div class="card" style="margin:0.5rem 0">
+                <p class="meta" style="margin-bottom:0.5rem">
+                  1. Go to the <strong>${conn.provider}</strong> developer console and create an OAuth app<br>
+                  2. Set redirect URI to: <code>http://localhost:3000/oauth/callback</code><br>
+                  3. Paste the credentials below
+                </p>
+                <form method="post" action="/skills/${encodeURIComponent(conn.skillDirName)}/oauth-setup/${encodeURIComponent(conn.secretKey)}"
+                      style="display:flex;flex-direction:column;gap:0.5rem;max-width:400px">
+                  <label class="meta">Client ID</label>
+                  <input type="text" name="clientId" required placeholder="your-client-id">
+                  <label class="meta">Client Secret</label>
+                  <input type="text" name="clientSecret" required placeholder="your-client-secret">
+                  <button type="submit" class="btn" style="align-self:flex-start">Save &amp; Connect</button>
+                </form>
+              </div>
+            </td>
+          </tr>`;
+      }
+
+      return `
+        <tr>
+          <td><a href="${skillUrl}">${conn.skillName}</a></td>
+          <td><code>${conn.provider}</code></td>
+          <td><span class="badge ${conn.connected ? 'badge--green' : 'badge--red'}">${conn.connected ? 'connected' : 'not connected'}</span></td>
+          <td style="display:flex;gap:0.5rem">${actionHtml}</td>
+        </tr>
+        ${setupPanel}`;
+    })
+    .join('');
+
+  return `
+    <table>
+      <thead><tr><th>Skill</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 // --- Routes ---
 
 app.get('/channels', async (c) => {
   try {
-    const res = await fetch(`${AGENT_URL()}/api/channels`);
-    const data = (await res.json()) as PlatformChannel[];
+    const [channelsRes, connectionsRes] = await Promise.all([
+      fetch(`${AGENT_URL()}/api/channels`),
+      fetch(`${AGENT_URL()}/api/connections`),
+    ]);
+    const channels = (await channelsRes.json()) as PlatformChannel[];
+    const connections = connectionsRes.ok ? ((await connectionsRes.json()) as Connection[]) : [];
 
     const importForm = `
       <div style="margin-bottom:1rem">
@@ -289,7 +388,12 @@ app.get('/channels', async (c) => {
         </div>
       </div>`;
 
-    return c.html(layout('Channels', `<h1>Channels</h1>${importForm}${renderChannels(data)}`));
+    const oauthSection = connections.length > 0 ? `
+      <h2 style="margin-top:2rem">OAuth Connections</h2>
+      ${renderOAuthConnections(connections)}
+    ` : '';
+
+    return c.html(layout('Channels', `<h1>Channels</h1>${importForm}${renderChannels(channels)}${oauthSection}`));
   } catch {
     return c.html(
       layout('Channels', '<h1>Channels</h1><p class="badge badge--red">Agent unreachable</p>'),
@@ -342,7 +446,7 @@ app.post('/channels/:name/start', async (c) => {
   const res = await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}/start`, { method: 'POST' });
 
   if (!res.ok) {
-    const error = await res.json();
+    const error = (await res.json()) as { error?: string };
     return c.html(`<div class="badge badge--red" style="margin-top:0.5rem">Failed to start: ${error.error}</div>`);
   }
 
@@ -386,6 +490,37 @@ app.post('/channels/:name/values/:key/delete', async (c) => {
   const res = await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}`);
   const channel = (await res.json()) as PlatformChannel;
   return c.html(renderConfigSection(channel));
+});
+
+app.put('/channels/:name/config', async (c) => {
+  const name = c.req.param('name');
+  try {
+    const body = await c.req.parseBody();
+    const configText = body.config as string;
+    if (!configText) return c.html('<p class="badge badge--red">Missing config</p>');
+
+    let config;
+    try {
+      config = JSON.parse(configText);
+    } catch {
+      return c.html('<p class="badge badge--red">Invalid JSON. Please fix and try again.</p>');
+    }
+
+    const res = await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+
+    if (!res.ok) {
+      const error = (await res.json()) as { error?: string };
+      return c.html(`<p class="badge badge--red">${error.error ?? 'Failed to save'}</p>`);
+    }
+
+    return c.html('<p class="badge badge--green">Config saved. Reload to see changes.</p>');
+  } catch {
+    return c.html('<p class="badge badge--red">Agent unreachable</p>');
+  }
 });
 
 app.delete('/channels/:name', async (c) => {
@@ -433,7 +568,7 @@ app.post('/channels/import', async (c) => {
   });
 
   if (!res.ok) {
-    const error = await res.json();
+    const error = (await res.json()) as { error?: string };
     return c.html(layout('Import Failed', `<h1>Import Failed</h1><p class="badge badge--red">${error.error}</p><p><a href="/channels">&larr; Back to Channels</a></p>`));
   }
 

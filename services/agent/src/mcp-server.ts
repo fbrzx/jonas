@@ -781,7 +781,7 @@ After creating, use channel_set_value to configure required secrets, then enable
       nextSteps += `\n\n⚠️ This channel requires configuration before it can be used.`;
       nextSteps += `\n\nPlease visit the dashboard to configure the required secrets:`;
       nextSteps += `\n${channelUrl}`;
-      nextSteps += `\n\nRequired secrets: ${data.config.requiredSecrets.join(', ')}`;
+      nextSteps += `\n\nRequired secrets: ${data.config!.requiredSecrets!.join(', ')}`;
       nextSteps += `\n\nAlternatively, use the channel_set_value tool to configure the channel via chat.`;
     } else {
       nextSteps += `\n\nThe channel is ready to use. Configure and enable it from: ${channelUrl}`;

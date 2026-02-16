@@ -231,7 +231,7 @@ app.put('/model/save', async (c) => {
     });
 
     if (!res.ok) {
-      const error = await res.json();
+      const error = (await res.json()) as { error?: string };
       throw new Error(error.error ?? 'Failed to save configuration');
     }
 

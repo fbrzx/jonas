@@ -1,10 +1,13 @@
-.PHONY: install build dev up down logs clean rebuild smoke
+.PHONY: install build typecheck dev up down logs clean rebuild smoke
 
 install:
 	pnpm install
 
 build:
 	pnpm build
+
+typecheck:
+	pnpm typecheck
 
 dev: build
 	docker compose up -d qdrant conduit

@@ -127,7 +127,7 @@ app.get('/audit', async (c) => {
     params.set('limit', limit);
 
     const res = await fetch(`${AGENT_URL()}/api/audit?${params.toString()}`);
-    const data = await res.json();
+    const data = (await res.json()) as AuditResponse | AuditEntry[];
     const tableHtml = renderTable(data);
 
     if (isHtmx) return c.html(tableHtml);

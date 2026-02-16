@@ -43,7 +43,7 @@ function renderConfigForm(config: ModelConfig, ollamaModels?: OllamaModelList): 
         </div>
 
         <div id="provider-config">
-          ${isOllama ? renderOllamaForm(ollamaBaseUrl, ollamaModel, ollamaModels) : renderClaudeForm(claudeModel)}
+          ${isOllama ? renderOllamaForm(ollamaBaseUrl, ollamaModel) : renderClaudeForm(claudeModel)}
         </div>
 
         <div class="form-group">
@@ -56,6 +56,25 @@ function renderConfigForm(config: ModelConfig, ollamaModels?: OllamaModelList): 
           <p class="badge badge--yellow">⚠️ Agent restart required after changing model provider</p>
         </div>
       </form>
+
+      <div style="margin-top:1rem">
+        <button class="btn btn--sm" onclick="document.getElementById('json-editor').toggleAttribute('hidden')">
+          Edit as JSON
+        </button>
+      </div>
+      <div id="json-editor" hidden style="margin-top:1rem">
+        <h3 style="margin-bottom:0.5rem">Edit model config (JSON)</h3>
+        <form hx-put="/model/save-json"
+              hx-target="#json-editor-result"
+              style="display:flex;flex-direction:column;gap:0.5rem">
+          <textarea name="config" rows="12" style="font-family:monospace;font-size:0.9em" required>${JSON.stringify(config, null, 2)}</textarea>
+          <div style="display:flex;gap:0.5rem">
+            <button type="submit" class="btn btn--sm">Save JSON</button>
+            <button type="button" class="btn btn--sm" onclick="document.getElementById('json-editor').toggleAttribute('hidden')">Cancel</button>
+          </div>
+        </form>
+        <div id="json-editor-result"></div>
+      </div>
     </div>
   `;
 }
@@ -211,8 +230,8 @@ app.put('/save', async (c) => {
     });
 
     if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.error ?? 'Failed to save configuration');
+      const error = (await res.json()) as { error?: string };
+      throw new Error(error?.error ?? 'Failed to save configuration');
     }
 
     return c.html(`
@@ -225,6 +244,39 @@ app.put('/save', async (c) => {
     return c.html(`
       <div class="badge badge--red">❌ ${msg}</div>
     `, 500);
+  }
+});
+
+// Save configuration as raw JSON
+app.put('/save-json', async (c) => {
+  try {
+    const body = await c.req.parseBody();
+    const configText = body.config as string;
+    if (!configText) return c.html('<p class="badge badge--red">Missing config</p>');
+
+    let config: ModelConfig;
+    try {
+      config = JSON.parse(configText);
+    } catch {
+      return c.html('<p class="badge badge--red">Invalid JSON. Please fix and try again.</p>');
+    }
+
+    const agentUrl = process.env.AGENT_API_URL ?? 'http://localhost:3001';
+    const res = await fetch(`${agentUrl}/api/model/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+
+    if (!res.ok) {
+      const error = (await res.json()) as { error?: string };
+      return c.html(`<p class="badge badge--red">${error.error ?? 'Failed to save'}</p>`);
+    }
+
+    return c.html('<p class="badge badge--green">Configuration saved! Restart the agent for changes to take effect.</p>');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to save configuration';
+    return c.html(`<p class="badge badge--red">${msg}</p>`);
   }
 });
 
