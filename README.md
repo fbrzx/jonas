@@ -46,7 +46,8 @@ You can also configure the model provider via the dashboard UI at runtime. See `
 ## Access
 
 - **Matrix/Element**: Chat from any device via `https://your.domain`
-- **Claude Code CLI**: `jonas-acp --url wss://your.domain:18789 --token <token>`
+- **Terminal CLI**: `jonas-acp --url wss://your.domain:18789 --token <token>` (see `.claude/docs/gateway-cli-usage.md`)
+- **Claude Desktop**: Configure MCP bridge in `claude_desktop_config.json` (see `.claude/docs/claude-desktop-integration.md`)
 - **Dashboard**: `ssh -L 3000:127.0.0.1:3000 user@your.domain` then `http://localhost:3000`
 - **Obsidian Vault**: `sshfs user@your.domain:/path/to/vault ~/Jonas-Vault`
 

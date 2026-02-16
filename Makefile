@@ -1,4 +1,4 @@
-.PHONY: install build dev up down logs clean
+.PHONY: install build dev up down logs clean rebuild smoke
 
 install:
 	pnpm install
@@ -15,6 +15,18 @@ up:
 
 down:
 	docker compose down
+
+rebuild: build
+	@echo "🔄 Rebuilding Jonas..."
+	docker compose down
+	docker compose up -d --build
+	@echo "⏳ Waiting for services to start..."
+	@sleep 5
+	@echo "✅ Rebuild complete!"
+
+smoke:
+	@echo "🧪 Running smoke tests..."
+	@./scripts/smoke-test.sh
 
 logs:
 	docker compose logs -f

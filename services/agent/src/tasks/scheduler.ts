@@ -139,6 +139,7 @@ export class TaskScheduler {
     log.info({ id: task.id, name: task.name }, 'Executing scheduled task');
     task.status = 'running';
     task.lastRun = isoNow();
+    await this.persist(); // FIX: Persist 'running' status immediately
 
     try {
       const response = await this.agent.chat(
@@ -151,16 +152,23 @@ export class TaskScheduler {
       task.lastResult = response.slice(0, 2000);
       await this.persist();
 
+      // FIX: Handle dispatchOutput errors separately
       if (task.targetChannel) {
-        await this.dispatchOutput(task.targetChannel, response);
-        log.info({ id: task.id, responseLen: response.length }, 'Task completed, output dispatched');
+        try {
+          await this.dispatchOutput(task.targetChannel, response);
+          log.info({ id: task.id, responseLen: response.length }, 'Task completed, output dispatched');
+        } catch (dispatchErr) {
+          log.error({ err: dispatchErr, id: task.id }, 'Failed to dispatch output, but task completed successfully');
+          // Don't mark task as failed - execution succeeded, only delivery failed
+        }
       } else {
         log.info({ id: task.id, responseLen: response.length }, 'Task completed (no output channel)');
       }
+
       return response;
     } catch (err) {
       task.status = 'failed';
-      task.lastResult = String(err);
+      task.lastResult = String(err).slice(0, 2000); // FIX: Truncate error messages too
       await this.persist();
       log.error(err, 'Task execution failed');
       throw err;

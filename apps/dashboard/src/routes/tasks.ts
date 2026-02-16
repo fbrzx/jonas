@@ -16,6 +16,8 @@ interface Task {
   nextRun?: string;
   lastRun?: string;
   runCount?: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  lastResult?: string;
 }
 
 function parseCronDescription(cron: string): string {
@@ -32,7 +34,15 @@ function parseCronDescription(cron: string): string {
 
 function renderTaskRow(task: Task): string {
   const nextRun = task.nextRun ? new Date(task.nextRun).toLocaleString() : 'Not scheduled';
+  const lastRun = task.lastRun ? new Date(task.lastRun).toLocaleString() : 'Never';
   const cronDesc = parseCronDescription(task.cron);
+
+  const statusBadge = {
+    pending: '<span class="badge">⏳ Pending</span>',
+    running: '<span class="badge badge--blue">▶️ Running</span>',
+    completed: '<span class="badge badge--green">✓ Success</span>',
+    failed: '<span class="badge badge--red">✗ Failed</span>',
+  }[task.status] || '<span class="badge">Unknown</span>';
 
   return `
     <tr id="task-${task.id}">
@@ -44,12 +54,17 @@ function renderTaskRow(task: Task): string {
         ${cronDesc}<br>
         <code style="font-size:0.7rem">${task.cron}</code>
       </td>
-      <td class="meta" style="font-size:0.75rem">${nextRun}</td>
+      <td class="meta" style="font-size:0.75rem">
+        <strong>Next:</strong> ${nextRun}<br>
+        <strong>Last:</strong> ${lastRun}
+      </td>
       <td>${task.targetChannelType || 'dashboard'}</td>
       <td>
         <span class="badge ${task.enabled ? 'badge--green' : 'badge--red'}">
           ${task.enabled ? '● Active' : '○ Paused'}
-        </span>
+        </span><br>
+        <div style="margin-top:0.25rem">${statusBadge}</div>
+        ${task.lastResult ? `<details style="margin-top:0.25rem"><summary class="meta" style="cursor:pointer;font-size:0.7rem">Last result</summary><pre style="font-size:0.65rem;margin-top:0.25rem;max-height:100px;overflow:auto">${task.lastResult}</pre></details>` : ''}
       </td>
       <td>
         <div style="display:flex;gap:0.25rem;flex-wrap:wrap">
@@ -118,7 +133,7 @@ function renderTasksList(tasks: Task[]): string {
   return `
     <table>
       <thead>
-        <tr><th>Task</th><th>Schedule</th><th>Next Run</th><th>Target</th><th>Status</th><th>Actions</th></tr>
+        <tr><th>Task</th><th>Schedule</th><th>Runs</th><th>Target</th><th>Status</th><th>Actions</th></tr>
       </thead>
       <tbody>${tasks.map(renderTaskRow).join('')}</tbody>
     </table>`;
