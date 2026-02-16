@@ -217,9 +217,48 @@ export function createApiServer(deps: ApiDeps) {
         channel,
         body.sessionKey
       );
+
+      // Gateway expects NDJSON stream
+      if (channel.type === 'gateway') {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            try {
+              controller.enqueue(encoder.encode(JSON.stringify({ kind: 'final', text: response }) + '\n'));
+              controller.close();
+            } catch (err) {
+              controller.error(err);
+            }
+          }
+        });
+        return new Response(stream, {
+          headers: { 'Content-Type': 'application/x-ndjson' }
+        });
+      }
+
       return c.json({ response });
     } catch (err) {
       log.error(err, 'Chat failed');
+
+      // Gateway expects NDJSON stream for errors too
+      if (channel.type === 'gateway') {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            try {
+              controller.enqueue(encoder.encode(JSON.stringify({ kind: 'error', message: 'Chat failed' }) + '\n'));
+              controller.close();
+            } catch (e) {
+              controller.error(e);
+            }
+          }
+        });
+        return new Response(stream, {
+          headers: { 'Content-Type': 'application/x-ndjson' },
+          status: 500
+        });
+      }
+
       return c.json({ error: 'Chat failed' }, 500);
     }
   });
