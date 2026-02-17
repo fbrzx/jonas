@@ -239,6 +239,7 @@ export function createApiServer(deps: ApiDeps) {
       return c.json({ response });
     } catch (err) {
       log.error(err, 'Chat failed');
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
 
       // Gateway expects NDJSON stream for errors too
       if (channel.type === 'gateway') {
@@ -246,7 +247,7 @@ export function createApiServer(deps: ApiDeps) {
         const stream = new ReadableStream({
           start(controller) {
             try {
-              controller.enqueue(encoder.encode(JSON.stringify({ kind: 'error', message: 'Chat failed' }) + '\n'));
+              controller.enqueue(encoder.encode(JSON.stringify({ kind: 'error', message: errorMessage }) + '\n'));
               controller.close();
             } catch (e) {
               controller.error(e);
@@ -259,7 +260,7 @@ export function createApiServer(deps: ApiDeps) {
         });
       }
 
-      return c.json({ error: 'Chat failed' }, 500);
+      return c.json({ error: errorMessage }, 500);
     }
   });
 
@@ -307,9 +308,12 @@ export function createApiServer(deps: ApiDeps) {
             send('message', { content: response });
             send('done', { status: 'done' });
           } catch (err) {
-            const msg = err instanceof Error && err.name === 'AbortError'
-              ? 'Response was aborted'
-              : 'Chat failed';
+            let msg: string;
+            if (err instanceof Error) {
+              msg = err.name === 'AbortError' ? 'Response was aborted' : err.message;
+            } else {
+              msg = 'Unknown error occurred';
+            }
             log.error(err, 'Stream chat failed');
             send('error', { error: msg });
           } finally {

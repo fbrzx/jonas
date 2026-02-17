@@ -67,7 +67,7 @@ export class ClaudeProvider implements ModelProvider {
 
       child.on('close', (code) => {
         opts.signal.removeEventListener('abort', onAbort);
-        log.info({ code, stdoutLen: stdout.length }, 'Claude CLI process exited');
+        log.info({ code, stdoutLen: stdout.length, stderrLen: stderr.length }, 'Claude CLI process exited');
 
         try {
           const result: CliResult = JSON.parse(stdout);
@@ -80,7 +80,10 @@ export class ClaudeProvider implements ModelProvider {
           resolve(result.result);
         } catch {
           if (code !== 0) {
-            reject(new Error(`Claude CLI exited with code ${code}: ${stderr || stdout}`));
+            // Try to extract useful error info from stderr
+            const errorDetail = stderr || stdout || 'Unknown error';
+            const trimmedError = errorDetail.substring(0, 500); // Limit error length
+            reject(new Error(`Claude CLI exited with code ${code}: ${trimmedError}`));
           } else {
             resolve(stdout.trim());
           }

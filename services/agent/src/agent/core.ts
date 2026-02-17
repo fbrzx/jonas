@@ -129,7 +129,10 @@ export class AgentCore {
         fullResponse = '[Query aborted]';
       } else {
         log.error(err, 'Model query failed');
-        throw err;
+        // Re-throw with better context
+        const error = err instanceof Error ? err : new Error(String(err));
+        error.message = this.categorizeError(error.message);
+        throw error;
       }
     } finally {
       this.abortControllers.delete(key);
@@ -275,5 +278,51 @@ export class AgentCore {
         log.warn(err, 'Failed to delete conversation from database');
       }
     }
+  }
+
+  /**
+   * Categorize error messages to help users understand what went wrong.
+   * Detects common error patterns and provides actionable feedback.
+   */
+  private categorizeError(message: string): string {
+    const lower = message.toLowerCase();
+
+    // Token/context length errors
+    if (lower.includes('context') && (lower.includes('length') || lower.includes('limit') || lower.includes('token'))) {
+      return 'Conversation is too long. The context limit has been exceeded. Try starting a new conversation or ask me to reset the session.';
+    }
+
+    // Rate limiting
+    if (lower.includes('rate limit') || lower.includes('too many requests') || lower.includes('429')) {
+      return 'Rate limit exceeded. The API is receiving too many requests. Please wait a moment and try again.';
+    }
+
+    // Authentication/OAuth errors
+    if (lower.includes('unauthorized') || lower.includes('401') || lower.includes('authentication') || lower.includes('invalid token')) {
+      return 'Authentication error. The OAuth token may have expired or been revoked. Please check the agent configuration.';
+    }
+
+    // Timeout errors
+    if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('etimedout')) {
+      return 'Request timed out. The model took too long to respond. Please try again with a simpler query.';
+    }
+
+    // Network/connection errors
+    if (lower.includes('network') || lower.includes('econnrefused') || lower.includes('enotfound') || lower.includes('connection')) {
+      return 'Network error. Unable to connect to the Claude API. Please check your internet connection.';
+    }
+
+    // Claude CLI specific errors
+    if (lower.includes('claude cli exited with code')) {
+      return `${message}. This may indicate a configuration issue or the request was too complex.`;
+    }
+
+    // MCP/tool errors
+    if (lower.includes('mcp') || lower.includes('tool') && lower.includes('error')) {
+      return `Tool execution error: ${message}`;
+    }
+
+    // If we can't categorize it, return the original message with a prefix
+    return `Error: ${message}`;
   }
 }

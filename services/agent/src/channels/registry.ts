@@ -282,7 +282,13 @@ export class ChannelRegistry {
           }),
         });
 
-        const data = (await response.json()) as { response?: string };
+        const data = (await response.json()) as { response?: string; error?: string };
+
+        // If the API returned an error, throw it
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
         return data.response ?? 'No response';
       } catch (err) {
         log.error({ err, channel: channel.dirName }, 'Failed to send to agent');
