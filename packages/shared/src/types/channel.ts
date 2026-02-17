@@ -24,7 +24,7 @@ export interface PlatformChannel {
   metadata: ChannelMetadata;
   status: ChannelStatus;
   state: ChannelState;
-  runtime: 'node' | 'python';
+  runtime: 'node';
   filePath: string;
   loadedAt: string;
   config?: ChannelConfig;

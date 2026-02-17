@@ -442,8 +442,9 @@ export class SkillRegistry {
       // Get relative path by removing base directory
       const relativePath = baseDir ? entry.entryName.slice(baseDir.length) : entry.entryName;
 
-      // Skip hidden files and macOS metadata
+      // Skip hidden files, macOS metadata, and vault files (preserve existing secrets)
       if (relativePath.startsWith('.') || relativePath.includes('/__MACOSX/')) continue;
+      if (relativePath === 'vault.enc' || relativePath === 'vault.json') continue;
 
       const targetPath = join(skillDir, relativePath);
       const targetDir = join(targetPath, '..');

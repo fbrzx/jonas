@@ -13,7 +13,6 @@ import type {
 } from '@jonas/shared/types';
 import { createLogger } from '@jonas/shared/utils';
 import type { SkillCryptoStore } from '../skills/crypto-store.js';
-import { PythonChannelProcess } from './python-process.js';
 
 const log = createLogger('channels');
 
@@ -117,10 +116,8 @@ export class ChannelRegistry {
     // Load secret keys from vault
     const secretKeys = await this.cryptoStore.getKeys(channelPath);
 
-    // Detect runtime (prefer Python, fallback to Node.js)
-    const pyHandlerPath = join(channelPath, 'handler.py');
-    const jsHandlerPath = join(channelPath, 'handler.js');
-    const runtime: 'node' | 'python' = existsSync(pyHandlerPath) ? 'python' : existsSync(jsHandlerPath) ? 'node' : 'node';
+    // Runtime is always Node.js
+    const runtime: 'node' = 'node';
 
     // Get status from state file (default: disabled)
     const status = state.channels[dirName]?.status ?? 'disabled';
@@ -260,7 +257,6 @@ export class ChannelRegistry {
 
   private async loadHandler(channel: PlatformChannel): Promise<ChannelHandler> {
     const jsHandlerPath = join(channel.filePath, 'handler.js');
-    const pyHandlerPath = join(channel.filePath, 'handler.py');
 
     // Load secrets
     const secrets = await this.cryptoStore.getAll(channel.filePath);
@@ -268,7 +264,10 @@ export class ChannelRegistry {
     // Get config
     const config = channel.config ?? {};
 
-    // Create sendToAgent callback (for JS handlers)
+    // Capture channel name for closures
+    const channelName = channel.dirName;
+
+    // Create sendToAgent callback
     const sendToAgent = async (message: string, channelId: string): Promise<string> => {
       try {
         const response = await fetch('http://localhost:3001/api/chat', {
@@ -276,9 +275,9 @@ export class ChannelRegistry {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message,
-            channelType: `channel:${channel.dirName}`,
+            channelType: `channel:${channelName}`,
             channelId,
-            sessionKey: `channel:${channel.dirName}:${channelId}`,
+            sessionKey: `channel:${channelName}:${channelId}`,
           }),
         });
 
@@ -291,43 +290,12 @@ export class ChannelRegistry {
 
         return data.response ?? 'No response';
       } catch (err) {
-        log.error({ err, channel: channel.dirName }, 'Failed to send to agent');
+        log.error({ err, channel: channelName }, 'Failed to send to agent');
         throw err;
       }
     };
 
-    // Create onMessageReceived callback (for Python handlers)
-    const onMessageReceived = async (channelId: string, message: string): Promise<void> => {
-      try {
-        await fetch('http://localhost:3001/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message,
-            channelType: `channel:${channel.dirName}`,
-            channelId,
-            sessionKey: `channel:${channel.dirName}:${channelId}`,
-          }),
-        });
-      } catch (err) {
-        log.error({ err, channel: channel.dirName }, 'Failed to send message to agent');
-      }
-    };
-
-    // Check for Python handler first (preferred)
-    if (existsSync(pyHandlerPath)) {
-      log.info({ channel: channel.dirName }, 'Loading Python handler');
-
-      return new PythonChannelProcess({
-        handlerPath: pyHandlerPath,
-        config,
-        secrets,
-        onMessageReceived,
-        channelName: channel.dirName,
-      });
-    }
-
-    // Fallback to JavaScript handler
+    // Load JavaScript handler
     if (existsSync(jsHandlerPath)) {
       log.info({ channel: channel.dirName }, 'Loading JavaScript handler');
 
@@ -339,7 +307,7 @@ export class ChannelRegistry {
       return module.initialize(config, secrets, sendToAgent);
     }
 
-    throw new Error(`No handler found (checked handler.py and handler.js)`);
+    throw new Error(`No handler found at ${jsHandlerPath}`);
   }
 
   async setChannelValue(name: string, key: string, value: string): Promise<void> {
@@ -403,11 +371,12 @@ export class ChannelRegistry {
 
     const zip = new AdmZip();
 
-    // Add all files from channel directory EXCEPT vault.enc
+    // Add all files from channel directory EXCEPT vault files (secrets)
     const entries = await readdir(channel.filePath, { withFileTypes: true });
 
     for (const entry of entries) {
-      if (entry.name === 'vault.enc') continue; // Exclude secrets
+      // Exclude vault files to prevent exporting secrets
+      if (entry.name === 'vault.enc' || entry.name === 'vault.json') continue;
 
       const fullPath = join(channel.filePath, entry.name);
 
@@ -438,12 +407,23 @@ export class ChannelRegistry {
     const channelPath = join(this.channelsDir, channelName);
 
     // Check if exists
+    const existingVaultEnc = existsSync(join(channelPath, 'vault.enc')) ? await readFile(join(channelPath, 'vault.enc')) : null;
+    const existingVaultJson = existsSync(join(channelPath, 'vault.json')) ? await readFile(join(channelPath, 'vault.json')) : null;
+
     if (existsSync(channelPath) && !overwrite) {
       throw new Error(`Channel already exists: ${channelName}`);
     }
 
     // Extract to channels directory
     zip.extractAllTo(channelPath, true);
+
+    // Restore existing vault files (never overwrite secrets)
+    if (existingVaultEnc) {
+      await writeFile(join(channelPath, 'vault.enc'), existingVaultEnc);
+    }
+    if (existingVaultJson) {
+      await writeFile(join(channelPath, 'vault.json'), existingVaultJson);
+    }
 
     // Load the new channel
     const state = await this.loadState();
@@ -459,9 +439,7 @@ export class ChannelRegistry {
   async create(
     dirName: string,
     metadata: ChannelMetadata,
-    config?: ChannelConfig,
-    handlerPy?: string,
-    requirementsTxt?: string
+    config?: ChannelConfig
   ): Promise<PlatformChannel> {
     const channelPath = join(this.channelsDir, dirName);
 
@@ -492,30 +470,8 @@ ${metadata.description}
       await writeFile(join(channelPath, 'config.json'), JSON.stringify(config, null, 2));
     }
 
-    // Create Python handler if provided
-    if (handlerPy) {
-      await writeFile(join(channelPath, 'handler.py'), handlerPy);
-
-      // Install Python dependencies if requirements.txt provided
-      if (requirementsTxt) {
-        await writeFile(join(channelPath, 'requirements.txt'), requirementsTxt);
-
-        try {
-          const { execFile } = await import('node:child_process');
-          const { promisify } = await import('node:util');
-          const execFileAsync = promisify(execFile);
-
-          await execFileAsync('pip3', [
-            'install', '--break-system-packages', '-q', '-r', join(channelPath, 'requirements.txt'),
-          ]);
-          log.info({ channel: dirName }, 'Python dependencies installed');
-        } catch (err) {
-          log.warn({ channel: dirName, err }, 'Failed to install Python dependencies');
-        }
-      }
-    } else {
-      // Create stub handler.js if no Python handler provided
-      const handlerStub = `export async function initialize(config, secrets, sendToAgent) {
+    // Create stub handler.js
+    const handlerStub = `export async function initialize(config, secrets, sendToAgent) {
   return {
     start: async () => {
       console.log('Channel started');
@@ -529,8 +485,7 @@ ${metadata.description}
   };
 }
 `;
-      await writeFile(join(channelPath, 'handler.js'), handlerStub);
-    }
+    await writeFile(join(channelPath, 'handler.js'), handlerStub);
 
     // Load the new channel
     const state = await this.loadState();
