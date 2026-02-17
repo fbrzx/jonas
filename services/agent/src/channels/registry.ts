@@ -13,6 +13,7 @@ import type {
 } from '@jonas/shared/types';
 import { createLogger } from '@jonas/shared/utils';
 import type { SkillCryptoStore } from '../skills/crypto-store.js';
+import { PythonChannelProcess } from './python-process.js';
 
 const log = createLogger('channels');
 
@@ -116,6 +117,11 @@ export class ChannelRegistry {
     // Load secret keys from vault
     const secretKeys = await this.cryptoStore.getKeys(channelPath);
 
+    // Detect runtime (prefer Python, fallback to Node.js)
+    const pyHandlerPath = join(channelPath, 'handler.py');
+    const jsHandlerPath = join(channelPath, 'handler.js');
+    const runtime: 'node' | 'python' = existsSync(pyHandlerPath) ? 'python' : existsSync(jsHandlerPath) ? 'node' : 'node';
+
     // Get status from state file (default: disabled)
     const status = state.channels[dirName]?.status ?? 'disabled';
 
@@ -124,6 +130,7 @@ export class ChannelRegistry {
       metadata,
       status,
       state: 'stopped',
+      runtime,
       filePath: channelPath,
       loadedAt: new Date().toISOString(),
       config,
@@ -252,11 +259,8 @@ export class ChannelRegistry {
   }
 
   private async loadHandler(channel: PlatformChannel): Promise<ChannelHandler> {
-    const handlerPath = join(channel.filePath, 'handler.js');
-
-    if (!existsSync(handlerPath)) {
-      throw new Error(`Handler not found: ${handlerPath}`);
-    }
+    const jsHandlerPath = join(channel.filePath, 'handler.js');
+    const pyHandlerPath = join(channel.filePath, 'handler.py');
 
     // Load secrets
     const secrets = await this.cryptoStore.getAll(channel.filePath);
@@ -264,7 +268,7 @@ export class ChannelRegistry {
     // Get config
     const config = channel.config ?? {};
 
-    // Create sendToAgent callback
+    // Create sendToAgent callback (for JS handlers)
     const sendToAgent = async (message: string, channelId: string): Promise<string> => {
       try {
         const response = await fetch('http://localhost:3001/api/chat', {
@@ -286,13 +290,50 @@ export class ChannelRegistry {
       }
     };
 
-    // Dynamic import and initialize
-    const module = await import(handlerPath);
-    if (!module.initialize) {
-      throw new Error('Handler must export initialize function');
+    // Create onMessageReceived callback (for Python handlers)
+    const onMessageReceived = async (channelId: string, message: string): Promise<void> => {
+      try {
+        await fetch('http://localhost:3001/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message,
+            channelType: `channel:${channel.dirName}`,
+            channelId,
+            sessionKey: `channel:${channel.dirName}:${channelId}`,
+          }),
+        });
+      } catch (err) {
+        log.error({ err, channel: channel.dirName }, 'Failed to send message to agent');
+      }
+    };
+
+    // Check for Python handler first (preferred)
+    if (existsSync(pyHandlerPath)) {
+      log.info({ channel: channel.dirName }, 'Loading Python handler');
+
+      return new PythonChannelProcess({
+        handlerPath: pyHandlerPath,
+        config,
+        secrets,
+        onMessageReceived,
+        channelName: channel.dirName,
+      });
     }
 
-    return module.initialize(config, secrets, sendToAgent);
+    // Fallback to JavaScript handler
+    if (existsSync(jsHandlerPath)) {
+      log.info({ channel: channel.dirName }, 'Loading JavaScript handler');
+
+      const module = await import(jsHandlerPath);
+      if (!module.initialize) {
+        throw new Error('Handler must export initialize function');
+      }
+
+      return module.initialize(config, secrets, sendToAgent);
+    }
+
+    throw new Error(`No handler found (checked handler.py and handler.js)`);
   }
 
   async setChannelValue(name: string, key: string, value: string): Promise<void> {
@@ -412,7 +453,9 @@ export class ChannelRegistry {
   async create(
     dirName: string,
     metadata: ChannelMetadata,
-    config?: ChannelConfig
+    config?: ChannelConfig,
+    handlerPy?: string,
+    requirementsTxt?: string
   ): Promise<PlatformChannel> {
     const channelPath = join(this.channelsDir, dirName);
 
@@ -443,8 +486,30 @@ ${metadata.description}
       await writeFile(join(channelPath, 'config.json'), JSON.stringify(config, null, 2));
     }
 
-    // Create stub handler.js
-    const handlerStub = `export async function initialize(config, secrets, sendToAgent) {
+    // Create Python handler if provided
+    if (handlerPy) {
+      await writeFile(join(channelPath, 'handler.py'), handlerPy);
+
+      // Install Python dependencies if requirements.txt provided
+      if (requirementsTxt) {
+        await writeFile(join(channelPath, 'requirements.txt'), requirementsTxt);
+
+        try {
+          const { execFile } = await import('node:child_process');
+          const { promisify } = await import('node:util');
+          const execFileAsync = promisify(execFile);
+
+          await execFileAsync('pip3', [
+            'install', '--break-system-packages', '-q', '-r', join(channelPath, 'requirements.txt'),
+          ]);
+          log.info({ channel: dirName }, 'Python dependencies installed');
+        } catch (err) {
+          log.warn({ channel: dirName, err }, 'Failed to install Python dependencies');
+        }
+      }
+    } else {
+      // Create stub handler.js if no Python handler provided
+      const handlerStub = `export async function initialize(config, secrets, sendToAgent) {
   return {
     start: async () => {
       console.log('Channel started');
@@ -458,7 +523,8 @@ ${metadata.description}
   };
 }
 `;
-    await writeFile(join(channelPath, 'handler.js'), handlerStub);
+      await writeFile(join(channelPath, 'handler.js'), handlerStub);
+    }
 
     // Load the new channel
     const state = await this.loadState();

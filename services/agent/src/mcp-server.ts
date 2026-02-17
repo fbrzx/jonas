@@ -688,29 +688,38 @@ server.tool(
   `Create a new communication channel. A channel is a directory in /data/channels/ containing:
 - channel.md: YAML frontmatter (name, platform, version, author, mode) + markdown description
 - config.json: declares required/optional secrets and channel configuration
-- handler.js: Node.js ES module implementing the ChannelHandler interface
+- handler.py (recommended) OR handler.js: Channel handler implementation
 
 Channels enable Jonas to connect to communication platforms (Telegram, Slack, Discord, WhatsApp, etc.).
 
-channel.md structure:
----
-name: Platform Name
-platform: platform-id
-version: 1.0.0
-author: your-name
-mode: webhook|polling|both
----
+PYTHON HANDLERS (Recommended):
+Python handlers run as isolated child processes with their own dependencies (requirements.txt).
+This keeps the Node.js core clean and allows channel-specific Python packages.
 
-# Channel Description
+handler.py template:
+from channels.python_handler import PythonChannelHandler
 
-config.json structure:
-{
-  "requiredSecrets": ["PLATFORM_TOKEN"],
-  "optionalSecrets": ["WEBHOOK_SECRET"],
-  "mode": "webhook",
-  "port": 3003
-}
+class MyChannelHandler(PythonChannelHandler):
+    async def on_start(self):
+        # Start webhook/polling
+        pass
 
+    async def on_stop(self):
+        # Cleanup
+        pass
+
+    async def on_send(self, channel_id: str, text: str):
+        # Send message to platform
+        pass
+
+def main():
+    handler = MyChannelHandler()
+    asyncio.run(handler.run())
+
+if __name__ == "__main__":
+    main()
+
+JAVASCRIPT HANDLERS (Legacy):
 handler.js must export an initialize function:
 export async function initialize(config, secrets, sendToAgent) {
   return {
@@ -725,9 +734,11 @@ After creating, use channel_set_value to configure required secrets, then enable
     dirName: z.string().describe('Directory name for the channel (lowercase, hyphens, e.g., "slack")'),
     channelMd: z.string().describe('Full content of channel.md including YAML frontmatter (---\\nname: ...\\nplatform: ...\\n---) and markdown description'),
     configJson: z.string().optional().describe('JSON string for config.json, e.g., {"requiredSecrets":["SLACK_BOT_TOKEN"],"mode":"webhook","port":3003}'),
-    handlerJs: z.string().optional().describe('JavaScript source code for handler.js (ES module implementing ChannelHandler interface)'),
+    handlerPy: z.string().optional().describe('Python source code for handler.py (PythonChannelHandler subclass). RECOMMENDED for new channels.'),
+    requirementsTxt: z.string().optional().describe('Python dependencies (pip packages, one per line). Only used with handlerPy.'),
+    handlerJs: z.string().optional().describe('JavaScript source code for handler.js (ES module implementing ChannelHandler interface). Legacy option.'),
   },
-  async ({ dirName, channelMd, configJson, handlerJs }) => {
+  async ({ dirName, channelMd, configJson, handlerPy, requirementsTxt, handlerJs }) => {
     const body: Record<string, unknown> = {
       dirName,
       metadata: {} as Record<string, unknown>,
@@ -751,6 +762,14 @@ After creating, use channel_set_value to configure required secrets, then enable
       try { body.config = JSON.parse(configJson); } catch { body.config = undefined; }
     }
 
+    if (handlerPy) {
+      body.handlerPy = handlerPy;
+    }
+
+    if (requirementsTxt) {
+      body.requirementsTxt = requirementsTxt;
+    }
+
     const res = await fetch(`${AGENT_API}/api/channels`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -761,7 +780,7 @@ After creating, use channel_set_value to configure required secrets, then enable
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to create channel' }) }], isError: true };
     }
 
-    // Write handler.js if provided
+    // Write handler.js if provided (legacy support)
     if (handlerJs) {
       try {
         await writeFile(`/data/channels/${dirName}/handler.js`, handlerJs);

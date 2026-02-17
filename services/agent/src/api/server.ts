@@ -621,8 +621,8 @@ export function createApiServer(deps: ApiDeps) {
   app.post('/api/channels', async (c) => {
     if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
     try {
-      const { dirName, metadata, config } = await c.req.json();
-      const channel = await deps.channelRegistry.create(dirName, metadata, config);
+      const { dirName, metadata, config, handlerPy, requirementsTxt } = await c.req.json();
+      const channel = await deps.channelRegistry.create(dirName, metadata, config, handlerPy, requirementsTxt);
       return c.json(channel, 201);
     } catch (err) {
       log.error(err, 'Failed to create channel');
