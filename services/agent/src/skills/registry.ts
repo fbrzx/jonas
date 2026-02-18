@@ -7,6 +7,7 @@ import { createLogger, isoNow } from '@jonas/shared/utils';
 import type { Skill, SkillConfig, SkillMetadata, SkillStatus, Connection } from '@jonas/shared/types';
 import { loadSkillState, saveSkillState, type SkillStateMap } from './storage.js';
 import type { SkillCryptoStore } from './crypto-store.js';
+import type { ConnectionManager } from '../connections/manager.js';
 
 const log = createLogger('skill-registry');
 const execFileAsync = promisify(execFile);
@@ -51,9 +52,11 @@ export class SkillRegistry {
   private bodies = new Map<string, string>();
   private state: SkillStateMap = {};
   private cryptoStore: SkillCryptoStore;
+  private connectionManager?: ConnectionManager;
 
-  constructor(cryptoStore: SkillCryptoStore) {
+  constructor(cryptoStore: SkillCryptoStore, connectionManager?: ConnectionManager) {
     this.cryptoStore = cryptoStore;
+    this.connectionManager = connectionManager;
   }
 
   async load(): Promise<void> {
@@ -350,6 +353,37 @@ export class SkillRegistry {
     await saveSkillState(STATE_PATH, this.state);
 
     log.info({ skill: name }, 'Skill deleted');
+    return true;
+  }
+
+  /**
+   * Update source files for a skill. Writes any provided files to disk
+   * and reloads metadata (hot-reload).
+   */
+  async updateSource(
+    name: string,
+    opts: { skillMd?: string; toolServerPy?: string; requirementsTxt?: string },
+  ): Promise<boolean> {
+    const skill = this.skills.get(name);
+    if (!skill) return false;
+
+    if (opts.skillMd !== undefined) {
+      await writeFile(join(skill.filePath, 'skill.md'), opts.skillMd, 'utf-8');
+    }
+
+    if (opts.toolServerPy !== undefined) {
+      await mkdir(join(skill.filePath, 'tools'), { recursive: true });
+      await writeFile(join(skill.filePath, 'tools', 'server.py'), opts.toolServerPy, 'utf-8');
+    }
+
+    if (opts.requirementsTxt !== undefined) {
+      await writeFile(join(skill.filePath, 'requirements.txt'), opts.requirementsTxt, 'utf-8');
+    }
+
+    // Reload skill metadata
+    await this.loadSkill(name);
+
+    log.info({ skill: name, updatedFiles: Object.keys(opts).filter((k) => opts[k as keyof typeof opts] !== undefined) }, 'Skill source updated');
     return true;
   }
 

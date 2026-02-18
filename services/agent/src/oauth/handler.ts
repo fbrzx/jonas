@@ -2,6 +2,7 @@ import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { createLogger } from '@jonas/shared/utils';
 import type { OAuthProviderStore } from './provider-store.js';
 import type { SkillRegistry } from '../skills/registry.js';
+import type { ChannelRegistry } from '../channels/registry.js';
 
 const log = createLogger('oauth-handler');
 
@@ -11,22 +12,25 @@ const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 interface StatePayload {
   provider: string;
-  skillDirName: string;
+  skillDirName: string; // entity dir name — kept as skillDirName for backward compat
   secretKey: string;
   redirectUri: string;
   nonce: string;
   exp: number;
+  entityType?: 'skill' | 'channel';
 }
 
 export class OAuthHandler {
   private masterKey: Buffer | null;
   private providerStore: OAuthProviderStore;
   private skillRegistry: SkillRegistry;
+  private channelRegistry?: ChannelRegistry;
   private redirectUri: string;
 
   constructor(opts: {
     providerStore: OAuthProviderStore;
     skillRegistry: SkillRegistry;
+    channelRegistry?: ChannelRegistry;
     redirectUri?: string;
   }) {
     const keyHex = process.env.SKILLS_ENCRYPTION_KEY;
@@ -38,6 +42,7 @@ export class OAuthHandler {
     }
     this.providerStore = opts.providerStore;
     this.skillRegistry = opts.skillRegistry;
+    this.channelRegistry = opts.channelRegistry;
     this.redirectUri = opts.redirectUri ?? 'http://localhost:3000/oauth/callback';
   }
 
@@ -65,11 +70,14 @@ export class OAuthHandler {
 
   private async resolveCredentials(
     provider: string,
-    skillDirName: string,
+    entityDirName: string,
     secretKey: string,
+    entityType: 'skill' | 'channel' = 'skill',
   ): Promise<{ clientId: string; clientSecret: string; authEndpoint: string; tokenEndpoint: string }> {
-    // 1. Check inline per-skill credentials
-    const inline = await this.skillRegistry.getOAuthCredentials(skillDirName, secretKey);
+    // 1. Check inline per-entity credentials
+    const inline = entityType === 'channel' && this.channelRegistry
+      ? await this.channelRegistry.getOAuthCredentials(entityDirName, secretKey)
+      : await this.skillRegistry.getOAuthCredentials(entityDirName, secretKey);
     const providerConfig = this.providerStore.get(provider);
 
     if (inline) {
@@ -100,8 +108,10 @@ export class OAuthHandler {
     skillDirName: string;
     secretKey: string;
     scopes: string[];
+    entityType?: 'skill' | 'channel';
   }): Promise<{ authUrl: string; state: string }> {
-    const creds = await this.resolveCredentials(opts.provider, opts.skillDirName, opts.secretKey);
+    const entityType = opts.entityType ?? 'skill';
+    const creds = await this.resolveCredentials(opts.provider, opts.skillDirName, opts.secretKey, entityType);
 
     const state = this.encryptState({
       provider: opts.provider,
@@ -110,6 +120,7 @@ export class OAuthHandler {
       redirectUri: this.redirectUri,
       nonce: randomBytes(16).toString('hex'),
       exp: Date.now() + STATE_TTL_MS,
+      entityType,
     });
 
     const params = new URLSearchParams({
@@ -131,14 +142,15 @@ export class OAuthHandler {
   async exchange(opts: {
     code: string;
     state: string;
-  }): Promise<{ success: boolean; skillDirName: string; secretKey: string }> {
+  }): Promise<{ success: boolean; skillDirName: string; secretKey: string; entityType: 'skill' | 'channel' }> {
     const payload = this.decryptState(opts.state);
 
     if (Date.now() > payload.exp) {
       throw new Error('OAuth state expired');
     }
 
-    const creds = await this.resolveCredentials(payload.provider, payload.skillDirName, payload.secretKey);
+    const entityType = payload.entityType ?? 'skill';
+    const creds = await this.resolveCredentials(payload.provider, payload.skillDirName, payload.secretKey, entityType);
 
     // Use the redirect_uri from encrypted state to prevent tampering
     const body = new URLSearchParams({
@@ -170,22 +182,32 @@ export class OAuthHandler {
       throw new Error(`Token exchange failed: ${res.status}`);
     }
 
-    const tokenData = await res.json();
+    const tokenData = await res.json() as Record<string, unknown>;
 
-    // Store full token JSON in the skill's vault
-    const ok = await this.skillRegistry.setSkillValue(
-      payload.skillDirName,
-      payload.secretKey,
-      JSON.stringify(tokenData),
-    );
+    // Add obtained_at for expiry calculation: obtained_at + expires_in * 1000
+    tokenData.obtained_at = Date.now();
 
-    if (!ok) throw new Error(`Skill "${payload.skillDirName}" not found`);
+    // Store token in the appropriate registry
+    if (entityType === 'channel' && this.channelRegistry) {
+      await this.channelRegistry.setChannelValue(
+        payload.skillDirName,
+        payload.secretKey,
+        JSON.stringify(tokenData),
+      );
+    } else {
+      const ok = await this.skillRegistry.setSkillValue(
+        payload.skillDirName,
+        payload.secretKey,
+        JSON.stringify(tokenData),
+      );
+      if (!ok) throw new Error(`Skill "${payload.skillDirName}" not found`);
+    }
 
     log.info(
-      { provider: payload.provider, skill: payload.skillDirName, key: payload.secretKey },
+      { provider: payload.provider, entity: payload.skillDirName, key: payload.secretKey, entityType },
       'OAuth tokens stored',
     );
 
-    return { success: true, skillDirName: payload.skillDirName, secretKey: payload.secretKey };
+    return { success: true, skillDirName: payload.skillDirName, secretKey: payload.secretKey, entityType };
   }
 }

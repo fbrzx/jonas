@@ -248,6 +248,16 @@ created: ${new Date().toISOString()}
 // --- Task scheduler tools (call agent API) ---
 
 const AGENT_API = process.env.AGENT_API_URL ?? 'http://localhost:3001';
+const AGENT_TOKEN = process.env.AGENT_API_TOKEN ?? '';
+
+/** Authenticated fetch to the agent API. */
+function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string> ?? {}),
+  };
+  if (AGENT_TOKEN) headers['x-agent-token'] = AGENT_TOKEN;
+  return fetch(`${AGENT_API}${path}`, { ...init, headers });
+}
 
 server.tool(
   'task_schedule',
@@ -263,7 +273,7 @@ server.tool(
     const targetChannel = targetChannelType && targetChannelId
       ? { type: targetChannelType, id: targetChannelId }
       : undefined;
-    const res = await fetch(`${AGENT_API}/api/tasks`, {
+    const res = await apiFetch(`/api/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, cron, prompt, targetChannel }),
@@ -281,7 +291,7 @@ server.tool(
   'List all scheduled tasks.',
   {},
   async () => {
-    const res = await fetch(`${AGENT_API}/api/tasks`);
+    const res = await apiFetch(`/api/tasks`);
     const data = await res.json() as unknown;
     return { content: [{ type: 'text', text: JSON.stringify(data) }] };
   },
@@ -294,7 +304,7 @@ server.tool(
     id: z.string().describe('Task ID to remove'),
   },
   async ({ id }) => {
-    const res = await fetch(`${AGENT_API}/api/tasks/${id}`, { method: 'DELETE' });
+    const res = await apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
     const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to remove task' }) }], isError: true };
@@ -323,7 +333,7 @@ server.tool(
     if (targetChannelType && targetChannelId) {
       body.targetChannel = { type: targetChannelType, id: targetChannelId };
     }
-    const res = await fetch(`${AGENT_API}/api/tasks/${id}`, {
+    const res = await apiFetch(`/api/tasks/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -343,7 +353,7 @@ server.tool(
   'List all available skills and their status.',
   {},
   async () => {
-    const res = await fetch(`${AGENT_API}/api/skills`);
+    const res = await apiFetch(`/api/skills`);
     const data = await res.json() as unknown;
     return { content: [{ type: 'text', text: JSON.stringify(data) }] };
   },
@@ -356,7 +366,7 @@ server.tool(
     name: z.string().describe('Skill directory name to enable'),
   },
   async ({ name }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/enable`, { method: 'POST' });
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/enable`, { method: 'POST' });
     const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed' }) }], isError: true };
@@ -372,7 +382,7 @@ server.tool(
     name: z.string().describe('Skill directory name to disable'),
   },
   async ({ name }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/disable`, { method: 'POST' });
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/disable`, { method: 'POST' });
     const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed' }) }], isError: true };
@@ -421,7 +431,7 @@ then skill_oauth_link to generate a clickable authorization URL for the user.`,
     if (toolServerPy) body.toolServerPy = toolServerPy;
     if (requirementsTxt) body.requirementsTxt = requirementsTxt;
 
-    const res = await fetch(`${AGENT_API}/api/skills`, {
+    const res = await apiFetch(`/api/skills`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -479,7 +489,7 @@ server.tool(
     value: z.string().describe('Value to store (will be encrypted if master key is set)'),
   },
   async ({ name, key, value }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/values`, {
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/values`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, value }),
@@ -499,7 +509,7 @@ server.tool(
     name: z.string().describe('Skill directory name'),
   },
   async ({ name }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/config`);
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/config`);
     const data = await res.json() as { error?: string };
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed' }) }], isError: true };
@@ -523,7 +533,7 @@ server.tool(
       return { content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid JSON in configJson' }) }], isError: true };
     }
 
-    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/config`, {
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config),
@@ -543,7 +553,7 @@ server.tool(
     name: z.string().describe('Skill directory name'),
   },
   async ({ name }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}`, {
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     });
     const data = await res.json() as { error?: string };
@@ -561,7 +571,7 @@ server.tool(
     name: z.string().describe('Skill directory name'),
   },
   async ({ name }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(name)}/export`);
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/export`);
     if (!res.ok) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: 'Skill not found or export failed' }) }], isError: true };
     }
@@ -599,7 +609,7 @@ server.tool(
         formData.append('overwrite', 'true');
       }
 
-      const res = await fetch(`${AGENT_API}/api/skills/import`, {
+      const res = await apiFetch(`/api/skills/import`, {
         method: 'POST',
         body: formData,
       });
@@ -627,7 +637,7 @@ server.tool(
     clientSecret: z.string().describe('OAuth client secret from the provider'),
   },
   async ({ skillDirName, secretKey, clientId, clientSecret }) => {
-    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(skillDirName)}/oauth-provider/${encodeURIComponent(secretKey)}`, {
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(skillDirName)}/oauth-provider/${encodeURIComponent(secretKey)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ clientId, clientSecret }),
@@ -658,7 +668,7 @@ server.tool(
     const connectUrl = `${dashboardUrl}/oauth/connect/${encodeURIComponent(skillDirName)}/${encodeURIComponent(secretKey)}?${params.toString()}`;
 
     // Check if provider credentials are configured
-    const res = await fetch(`${AGENT_API}/api/skills/${encodeURIComponent(skillDirName)}`);
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(skillDirName)}`);
     let credentialsConfigured = false;
     if (res.ok) {
       const skill = await res.json() as { secretKeys?: string[] };
@@ -732,7 +742,7 @@ After creating, use channel_set_value to configure required secrets, then enable
       try { body.config = JSON.parse(configJson); } catch { body.config = undefined; }
     }
 
-    const res = await fetch(`${AGENT_API}/api/channels`, {
+    const res = await apiFetch(`/api/channels`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -790,7 +800,7 @@ server.tool(
     value: z.string().describe('Value to store (will be encrypted)'),
   },
   async ({ name, key, value }) => {
-    const res = await fetch(`${AGENT_API}/api/channels/${encodeURIComponent(name)}/values`, {
+    const res = await apiFetch(`/api/channels/${encodeURIComponent(name)}/values`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, value }),
@@ -810,6 +820,170 @@ server.tool(
         })
       }]
     };
+  },
+);
+
+server.tool(
+  'skill_update_source',
+  'Update the source files of an existing skill. Only the provided fields will be written. skill.md changes are immediately effective; tool server changes require the skill\'s MCP process to be restarted (happens automatically on next agent invocation).',
+  {
+    name: z.string().describe('Skill directory name'),
+    skillMd: z.string().optional().describe('New content for skill.md (YAML frontmatter + markdown instructions)'),
+    toolServerPy: z.string().optional().describe('New content for tools/server.py (Python FastMCP server)'),
+    requirementsTxt: z.string().optional().describe('New content for requirements.txt (pip dependencies)'),
+  },
+  async ({ name, skillMd, toolServerPy, requirementsTxt }) => {
+    const body: Record<string, string> = {};
+    if (skillMd !== undefined) body.skillMd = skillMd;
+    if (toolServerPy !== undefined) body.toolServerPy = toolServerPy;
+    if (requirementsTxt !== undefined) body.requirementsTxt = requirementsTxt;
+
+    if (Object.keys(body).length === 0) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'No fields provided to update' }) }], isError: true };
+    }
+
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/source`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json() as { error?: string };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to update skill source' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Skill "${name}" source updated: ${Object.keys(body).join(', ')}` }) }] };
+  },
+);
+
+server.tool(
+  'channel_update_source',
+  'Update the source files of an existing channel. Only the provided fields will be written. If the channel is running it will be stopped, updated, then restarted automatically.',
+  {
+    name: z.string().describe('Channel directory name'),
+    channelMd: z.string().optional().describe('New content for channel.md (YAML frontmatter + markdown description)'),
+    handlerJs: z.string().optional().describe('New content for handler.js (ES module implementing ChannelHandler interface)'),
+  },
+  async ({ name, channelMd, handlerJs }) => {
+    const body: Record<string, string> = {};
+    if (channelMd !== undefined) body.channelMd = channelMd;
+    if (handlerJs !== undefined) body.handlerJs = handlerJs;
+
+    if (Object.keys(body).length === 0) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'No fields provided to update' }) }], isError: true };
+    }
+
+    const res = await apiFetch(`/api/channels/${encodeURIComponent(name)}/source`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json() as { error?: string };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to update channel source' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Channel "${name}" source updated: ${Object.keys(body).join(', ')}` }) }] };
+  },
+);
+
+server.tool(
+  'channel_set_oauth_provider',
+  'Store OAuth app credentials (client ID and secret) for a specific channel\'s OAuth key. The user must first create an OAuth app in the provider\'s developer console.',
+  {
+    channelDirName: z.string().describe('Channel directory name'),
+    secretKey: z.string().describe('The OAuth key name from the channel config (e.g., "SLACK_TOKEN")'),
+    clientId: z.string().describe('OAuth client ID from the provider'),
+    clientSecret: z.string().describe('OAuth client secret from the provider'),
+  },
+  async ({ channelDirName, secretKey, clientId, clientSecret }) => {
+    const res = await apiFetch(`/api/channels/${encodeURIComponent(channelDirName)}/oauth-provider/${encodeURIComponent(secretKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, clientSecret }),
+    });
+    const data = await res.json() as { error?: string };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to store credentials' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `OAuth credentials stored for ${channelDirName}/${secretKey}` }) }] };
+  },
+);
+
+server.tool(
+  'channel_oauth_link',
+  'Generate a clickable OAuth authorization URL for a channel. Returns the URL to include in a markdown link so the user can authorize the channel to access a service.',
+  {
+    channelDirName: z.string().describe('Channel directory name'),
+    secretKey: z.string().describe('The OAuth key name from the channel config (e.g., "SLACK_TOKEN")'),
+    provider: z.string().describe('OAuth provider ID (e.g., "google", "github")'),
+    scopes: z.array(z.string()).describe('OAuth scopes to request'),
+  },
+  async ({ channelDirName, secretKey, provider, scopes }) => {
+    const dashboardUrl = process.env.DASHBOARD_URL ?? 'http://localhost:3000';
+    const params = new URLSearchParams({
+      provider,
+      scopes: scopes.join(','),
+    });
+    // Reuse the same OAuth connect flow (handler resolves entityDir via skillDirName param)
+    const connectUrl = `${dashboardUrl}/oauth/connect/${encodeURIComponent(channelDirName)}/${encodeURIComponent(secretKey)}?${params.toString()}&entityType=channel`;
+
+    // Check if provider credentials are configured
+    const res = await apiFetch(`/api/channels/${encodeURIComponent(channelDirName)}`);
+    let credentialsConfigured = false;
+    if (res.ok) {
+      const channel = await res.json() as { secretKeys?: string[] };
+      const secretKeys = channel.secretKeys ?? [];
+      credentialsConfigured = secretKeys.includes(`__oauth_${secretKey}_client_id`);
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          connectUrl,
+          credentialsConfigured,
+          message: credentialsConfigured
+            ? `OAuth link ready. Share this with the user: [Connect ${provider}](${connectUrl})`
+            : `OAuth credentials not yet configured for ${secretKey}. Use channel_set_oauth_provider first, then generate the link again.`,
+        }),
+      }],
+    };
+  },
+);
+
+server.tool(
+  'connection_status',
+  'List all OAuth connections (skills and channels) with their current status including expiry information.',
+  {},
+  async () => {
+    const res = await apiFetch(`/api/connections`);
+    const data = await res.json() as unknown;
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Failed to fetch connection status' }) }], isError: true };
+    }
+
+    // Format expiry times for readability
+    const formatExpiry = (expiresAt?: number): string => {
+      if (!expiresAt) return 'unknown';
+      const now = Date.now();
+      const diff = expiresAt - now;
+      if (diff < 0) return 'EXPIRED';
+      const hours = Math.floor(diff / (60 * 60 * 1000));
+      const minutes = Math.floor((diff % (60 * 60 * 1000)) / (60 * 1000));
+      return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+    };
+
+    // Enrich with formatted expiry if connectionStatus is present
+    if (data && typeof data === 'object' && 'connectionStatus' in data) {
+      const enriched = {
+        ...(data as Record<string, unknown>),
+        connectionStatus: ((data as { connectionStatus: Array<{ expiresAt?: number }> }).connectionStatus ?? []).map(
+          (c) => ({ ...c, expiresIn: formatExpiry(c.expiresAt) }),
+        ),
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(enriched, null, 2) }] };
+    }
+
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
   },
 );
 

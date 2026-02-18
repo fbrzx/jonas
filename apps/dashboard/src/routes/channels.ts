@@ -13,6 +13,11 @@ interface PairingStatus {
   challengeExpiresAt?: string;
 }
 
+interface OAuthFlowConfig {
+  provider: string;
+  scopes: string[];
+}
+
 interface Connection {
   skillDirName: string;
   skillName: string;
@@ -20,6 +25,14 @@ interface Connection {
   provider: string;
   connected: boolean;
   scopes: string[];
+}
+
+// /api/connections returns Connection[] or { skillConnections, connectionStatus } depending on agent version
+type ConnectionsResponse = Connection[] | { skillConnections: Connection[]; connectionStatus: unknown[] };
+
+function parseConnections(raw: ConnectionsResponse): Connection[] {
+  if (Array.isArray(raw)) return raw;
+  return raw.skillConnections ?? [];
 }
 
 function channelPairingType(name: string): string {
@@ -185,9 +198,95 @@ function renderPairingSection(channel: PlatformChannel, pairing: PairingStatus |
   `;
 }
 
+function renderChannelRequirements(channel: PlatformChannel): string {
+  const id = encodeURIComponent(channel.dirName);
+  const oauthEntries = Object.entries((channel.config?.oauth ?? {}) as Record<string, OAuthFlowConfig>);
+  const allVaultKeys = channel.secretKeys ?? [];
+
+  if (oauthEntries.length === 0) return '';
+
+  let rows = '';
+
+  for (const [key, flow] of oauthEntries) {
+    const tokenStored = allVaultKeys.includes(key);
+    const credsStored = allVaultKeys.includes(`__oauth_${key}_client_id`);
+
+    let statusBadge: string;
+    let actionHtml: string;
+
+    if (tokenStored) {
+      statusBadge = '<span class="badge badge--green">connected</span>';
+      actionHtml = `
+        <button class="btn btn--sm btn--danger"
+          hx-post="/channels/${id}/requirements/${encodeURIComponent(key)}/disconnect"
+          hx-target="#channel-requirements-section" hx-swap="innerHTML"
+          hx-confirm="Disconnect ${flow.provider} from this channel?"
+        >Disconnect</button>`;
+    } else if (credsStored) {
+      const connectParams = new URLSearchParams({
+        provider: flow.provider,
+        scopes: flow.scopes.join(','),
+        entityType: 'channel',
+      });
+      statusBadge = '<span class="badge badge--yellow">ready to connect</span>';
+      actionHtml = `
+        <a href="/oauth/connect/${encodeURIComponent(channel.dirName)}/${encodeURIComponent(key)}?${connectParams.toString()}"
+           class="btn btn--sm">Connect</a>`;
+    } else {
+      statusBadge = '<span class="badge badge--red">needs setup</span>';
+      actionHtml = `
+        <button class="btn btn--sm"
+          onclick="this.closest('tr').nextElementSibling.toggleAttribute('hidden')"
+        >Setup</button>`;
+    }
+
+    const setupPanel = !tokenStored && !credsStored ? `
+      <tr class="setup-panel" hidden>
+        <td colspan="4">
+          <div class="card" style="margin:0.5rem 0">
+            <p class="meta" style="margin-bottom:0.5rem">
+              1. Go to the <strong>${flow.provider}</strong> developer console and create an OAuth app<br>
+              2. Set redirect URI to: <code>${process.env.OAUTH_REDIRECT_DOMAIN ? `${process.env.OAUTH_REDIRECT_DOMAIN}/oauth/callback` : 'http://localhost:3000/oauth/callback'}</code><br>
+              3. Paste the credentials below
+            </p>
+            <form method="post" action="/channels/${id}/oauth-setup/${encodeURIComponent(key)}"
+                  style="display:flex;flex-direction:column;gap:0.5rem;max-width:400px">
+              <label class="meta">Client ID</label>
+              <input type="text" name="clientId" required placeholder="your-client-id">
+              <label class="meta">Client Secret</label>
+              <input type="text" name="clientSecret" required placeholder="your-client-secret">
+              <button type="submit" class="btn" style="align-self:flex-start">Save &amp; Connect</button>
+            </form>
+          </div>
+        </td>
+      </tr>` : '';
+
+    rows += `
+      <tr>
+        <td><code>${key}</code></td>
+        <td><span class="badge badge--blue">${flow.provider}</span></td>
+        <td>${statusBadge}</td>
+        <td>${actionHtml}</td>
+      </tr>
+      ${setupPanel}`;
+  }
+
+  return `
+    <table>
+      <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
 function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | null, pairingMessage?: string): string {
   const id = encodeURIComponent(channel.dirName);
   const configJson = channel.config ? JSON.stringify(channel.config, null, 2) : '{}';
+  const requirementsHtml = renderChannelRequirements(channel);
+  const requirementsSection = requirementsHtml ? `
+    <h2 style="margin-top:2rem">Requirements</h2>
+    <div class="card" id="channel-requirements-section">
+      ${requirementsHtml}
+    </div>` : '';
 
   return `
     <p><a href="/channels">&larr; Back to Channels</a></p>
@@ -254,6 +353,8 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
       <h2>Configuration</h2>
       ${renderConfigSection(channel)}
     </div>
+
+    ${requirementsSection}
 
     <div class="card" style="margin-top:1.5rem">
       <h2>Pairing</h2>
@@ -355,6 +456,80 @@ function renderOAuthConnections(connections: Connection[]): string {
 
 // --- Routes ---
 
+function renderChannelOAuthConnections(channels: PlatformChannel[]): string {
+  // Collect OAuth connections from channel configs
+  const rows: string[] = [];
+
+  for (const ch of channels) {
+    const oauth = (ch.config?.oauth ?? {}) as Record<string, OAuthFlowConfig>;
+    for (const [key, flow] of Object.entries(oauth)) {
+      const tokenStored = (ch.secretKeys ?? []).includes(key);
+      const credsStored = (ch.secretKeys ?? []).includes(`__oauth_${key}_client_id`);
+      const connectParams = new URLSearchParams({
+        provider: flow.provider,
+        scopes: flow.scopes.join(','),
+        entityType: 'channel',
+      });
+      const connectUrl = `/oauth/connect/${encodeURIComponent(ch.dirName)}/${encodeURIComponent(key)}?${connectParams.toString()}`;
+      const channelUrl = `/channels/${encodeURIComponent(ch.dirName)}`;
+
+      let actionHtml: string;
+      let setupPanel = '';
+      if (tokenStored) {
+        actionHtml = `
+          <a href="${connectUrl}" class="btn btn--sm">Reconnect</a>
+          <button class="btn btn--sm btn--danger"
+            hx-post="/channels/${encodeURIComponent(ch.dirName)}/requirements/${encodeURIComponent(key)}/disconnect"
+            hx-target="body" hx-swap="none"
+            hx-on::after-request="location.reload()"
+            hx-confirm="Disconnect ${flow.provider} from ${ch.metadata.name}?"
+          >Disconnect</button>`;
+      } else {
+        actionHtml = `
+          <button class="btn btn--sm"
+            onclick="this.closest('tr').nextElementSibling.toggleAttribute('hidden')"
+          >Setup ${flow.provider}</button>`;
+        setupPanel = `
+          <tr class="setup-panel" hidden>
+            <td colspan="4">
+              <div class="card" style="margin:0.5rem 0">
+                <p class="meta" style="margin-bottom:0.5rem">
+                  1. Go to the <strong>${flow.provider}</strong> developer console and create an OAuth app<br>
+                  2. Set redirect URI to: <code>${process.env.OAUTH_REDIRECT_DOMAIN ? `${process.env.OAUTH_REDIRECT_DOMAIN}/oauth/callback` : 'http://localhost:3000/oauth/callback'}</code><br>
+                  3. Paste the credentials below
+                </p>
+                <form method="post" action="/channels/${encodeURIComponent(ch.dirName)}/oauth-setup/${encodeURIComponent(key)}"
+                      style="display:flex;flex-direction:column;gap:0.5rem;max-width:400px">
+                  <label class="meta">Client ID</label>
+                  <input type="text" name="clientId" required placeholder="your-client-id">
+                  <label class="meta">Client Secret</label>
+                  <input type="text" name="clientSecret" required placeholder="your-client-secret">
+                  <button type="submit" class="btn" style="align-self:flex-start">Save &amp; Connect</button>
+                </form>
+              </div>
+            </td>
+          </tr>`;
+      }
+
+      rows.push(`
+        <tr>
+          <td><a href="${channelUrl}">${ch.metadata.name}</a></td>
+          <td><code>${flow.provider}</code></td>
+          <td><span class="badge ${tokenStored ? 'badge--green' : credsStored ? 'badge--yellow' : 'badge--red'}">${tokenStored ? 'connected' : credsStored ? 'ready' : 'not connected'}</span></td>
+          <td style="display:flex;gap:0.5rem">${actionHtml}</td>
+        </tr>
+        ${setupPanel}`);
+    }
+  }
+
+  if (rows.length === 0) return '';
+  return `
+    <table>
+      <thead><tr><th>Channel</th><th>Provider</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>${rows.join('')}</tbody>
+    </table>`;
+}
+
 app.get('/channels', async (c) => {
   try {
     const [channelsRes, connectionsRes] = await Promise.all([
@@ -362,7 +537,12 @@ app.get('/channels', async (c) => {
       fetch(`${AGENT_URL()}/api/connections`),
     ]);
     const channels = (await channelsRes.json()) as PlatformChannel[];
-    const connections = connectionsRes.ok ? ((await connectionsRes.json()) as Connection[]) : [];
+    const rawConnections = connectionsRes.ok
+      ? ((await connectionsRes.json()) as ConnectionsResponse)
+      : [];
+    const connections = parseConnections(rawConnections);
+
+    const channelOAuthRows = renderChannelOAuthConnections(channels);
 
     const importForm = `
       <div style="margin-bottom:1rem">
@@ -388,12 +568,17 @@ app.get('/channels', async (c) => {
         </div>
       </div>`;
 
-    const oauthSection = connections.length > 0 ? `
-      <h2 style="margin-top:2rem">OAuth Connections</h2>
+    const skillOAuthSection = connections.length > 0 ? `
+      <h2 style="margin-top:2rem">Skill OAuth Connections</h2>
       ${renderOAuthConnections(connections)}
     ` : '';
 
-    return c.html(layout('Channels', `<h1>Channels</h1>${importForm}${renderChannels(channels)}${oauthSection}`));
+    const channelOAuthSection = channelOAuthRows ? `
+      <h2 style="margin-top:2rem">Channel OAuth Connections</h2>
+      ${channelOAuthRows}
+    ` : '';
+
+    return c.html(layout('Channels', `<h1>Channels</h1>${importForm}${renderChannels(channels)}${skillOAuthSection}${channelOAuthSection}`));
   } catch {
     return c.html(
       layout('Channels', '<h1>Channels</h1><p class="badge badge--red">Agent unreachable</p>'),
@@ -573,6 +758,55 @@ app.post('/channels/import', async (c) => {
   }
 
   return c.redirect('/channels');
+});
+
+// --- Channel OAuth setup (inline credentials form) ---
+
+app.post('/channels/:name/oauth-setup/:key', async (c) => {
+  const name = c.req.param('name');
+  const key = c.req.param('key');
+  try {
+    const body = await c.req.parseBody();
+    const clientId = body.clientId as string;
+    const clientSecret = body.clientSecret as string;
+    if (!clientId || !clientSecret) return c.text('Missing clientId or clientSecret', 400);
+
+    await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}/oauth-provider/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, clientSecret }),
+    });
+
+    const res = await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}`);
+    const channel = (await res.json()) as PlatformChannel;
+    const oauth = (channel.config?.oauth as Record<string, OAuthFlowConfig> | undefined)?.[key];
+    if (!oauth) return c.redirect(`/channels/${encodeURIComponent(name)}`);
+
+    const connectParams = new URLSearchParams({
+      provider: oauth.provider,
+      scopes: oauth.scopes.join(','),
+      entityType: 'channel',
+    });
+    return c.redirect(`/oauth/connect/${encodeURIComponent(name)}/${encodeURIComponent(key)}?${connectParams.toString()}`);
+  } catch {
+    return c.text('Agent unreachable', 502);
+  }
+});
+
+// Disconnect OAuth token — returns updated requirements section HTML for HTMX
+app.post('/channels/:name/requirements/:key/disconnect', async (c) => {
+  const name = c.req.param('name');
+  const key = c.req.param('key');
+  try {
+    await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}/values/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+    });
+    const res = await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}`);
+    const channel = (await res.json()) as PlatformChannel;
+    return c.html(renderChannelRequirements(channel));
+  } catch {
+    return c.text('Agent unreachable', 502);
+  }
 });
 
 app.post('/channels/:name/pairing/init', async (c) => {

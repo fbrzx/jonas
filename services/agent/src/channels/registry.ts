@@ -13,6 +13,7 @@ import type {
 } from '@jonas/shared/types';
 import { createLogger } from '@jonas/shared/utils';
 import type { SkillCryptoStore } from '../skills/crypto-store.js';
+import type { ConnectionManager } from '../connections/manager.js';
 
 const log = createLogger('channels');
 
@@ -26,11 +27,13 @@ export class ChannelRegistry {
   private readonly channelsDir: string;
   private readonly stateFile: string;
   private readonly cryptoStore: SkillCryptoStore;
+  private readonly connectionManager?: ConnectionManager;
 
-  constructor(cryptoStore: SkillCryptoStore, dataDir = '/data') {
+  constructor(cryptoStore: SkillCryptoStore, dataDir = '/data', connectionManager?: ConnectionManager) {
     this.channelsDir = join(dataDir, 'channels');
     this.stateFile = join(dataDir, 'channels.json');
     this.cryptoStore = cryptoStore;
+    this.connectionManager = connectionManager;
   }
 
   async load(): Promise<void> {
@@ -202,6 +205,11 @@ export class ChannelRegistry {
     this.channels.set(name, channel);
 
     try {
+      // Refresh OAuth tokens before starting
+      if (this.connectionManager && channel.config?.oauth) {
+        await this.connectionManager.refreshForEntity(channel.filePath, channel.config.oauth);
+      }
+
       const handler = await this.loadHandler(channel);
       await handler.start();
 
@@ -363,6 +371,74 @@ export class ChannelRegistry {
     await this.saveState();
 
     log.info({ channel: name }, 'Channel deleted');
+  }
+
+  async setOAuthCredentials(
+    dirName: string,
+    secretKey: string,
+    clientId: string,
+    clientSecret: string,
+  ): Promise<boolean> {
+    const channel = this.channels.get(dirName);
+    if (!channel) return false;
+    await this.cryptoStore.set(channel.filePath, `__oauth_${secretKey}_client_id`, clientId);
+    await this.cryptoStore.set(channel.filePath, `__oauth_${secretKey}_client_secret`, clientSecret);
+    channel.secretKeys = await this.cryptoStore.getKeys(channel.filePath);
+    this.channels.set(dirName, channel);
+    log.info({ channel: dirName, secretKey }, 'Channel OAuth credentials set');
+    return true;
+  }
+
+  async getOAuthCredentials(
+    dirName: string,
+    secretKey: string,
+  ): Promise<{ clientId: string; clientSecret: string } | null> {
+    const channel = this.channels.get(dirName);
+    if (!channel) return null;
+    const all = await this.cryptoStore.getAll(channel.filePath);
+    const clientId = all[`__oauth_${secretKey}_client_id`];
+    const clientSecret = all[`__oauth_${secretKey}_client_secret`];
+    if (!clientId || !clientSecret) return null;
+    return { clientId, clientSecret };
+  }
+
+  /**
+   * Update source files for a channel. Writes any provided files to disk,
+   * reloads metadata, and restarts the channel if it was running.
+   */
+  async updateSource(
+    name: string,
+    opts: { channelMd?: string; handlerJs?: string },
+  ): Promise<boolean> {
+    const channel = this.channels.get(name);
+    if (!channel) return false;
+
+    const wasRunning = channel.state === 'running';
+
+    if (wasRunning) {
+      await this.stopChannel(name);
+    }
+
+    if (opts.channelMd !== undefined) {
+      await writeFile(join(channel.filePath, 'channel.md'), opts.channelMd, 'utf-8');
+    }
+
+    if (opts.handlerJs !== undefined) {
+      await writeFile(join(channel.filePath, 'handler.js'), opts.handlerJs, 'utf-8');
+    }
+
+    // Reload metadata from disk
+    const state = await this.loadState();
+    const updated = await this.loadChannel(name, channel.filePath, state);
+    this.channels.set(name, updated);
+
+    log.info({ channel: name, updatedFiles: Object.keys(opts).filter((k) => opts[k as keyof typeof opts] !== undefined) }, 'Channel source updated');
+
+    if (wasRunning) {
+      await this.startChannel(name);
+    }
+
+    return true;
   }
 
   async exportChannel(name: string): Promise<Buffer | null> {

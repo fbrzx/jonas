@@ -16,6 +16,7 @@ export interface ChannelConfig {
   mode?: 'webhook' | 'polling';
   port?: number;
   pollInterval?: number;
+  oauth?: Record<string, import('./oauth.js').OAuthFlowConfig>;
   [key: string]: unknown;
 }
 

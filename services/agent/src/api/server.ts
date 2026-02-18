@@ -14,6 +14,7 @@ import type { ChannelRegistry } from '../channels/registry.js';
 import { ProviderFactory } from '../agent/providers/factory.js';
 import type { ProviderConfig } from '../agent/providers/base.js';
 import type { ChannelPairingService } from '../channels/pairing.js';
+import type { ConnectionManager } from '../connections/manager.js';
 
 const log = createLogger('api');
 
@@ -28,6 +29,7 @@ interface ApiDeps {
   database?: ConversationDatabase;
   channelRegistry?: ChannelRegistry;
   pairingService?: ChannelPairingService;
+  connectionManager?: ConnectionManager;
 }
 
 export function createApiServer(deps: ApiDeps) {
@@ -863,6 +865,7 @@ export function createApiServer(deps: ApiDeps) {
       skillDirName: string;
       secretKey: string;
       scopes: string[];
+      entityType?: 'skill' | 'channel';
     }>();
     try {
       const result = await deps.oauthHandler.authorize(body);
@@ -880,6 +883,7 @@ export function createApiServer(deps: ApiDeps) {
     const skillDirName = c.req.query('skillDirName');
     const secretKey = c.req.query('secretKey');
     const scopes = c.req.query('scopes');
+    const entityType = (c.req.query('entityType') ?? 'skill') as 'skill' | 'channel';
     if (!provider || !skillDirName || !secretKey) {
       return c.json({ error: 'Missing required query params: provider, skillDirName, secretKey' }, 400);
     }
@@ -889,6 +893,7 @@ export function createApiServer(deps: ApiDeps) {
         skillDirName,
         secretKey,
         scopes: scopes?.split(',').map((s) => s.trim()).filter(Boolean) ?? [],
+        entityType,
       });
       return c.json(result);
     } catch (err) {
@@ -912,9 +917,42 @@ export function createApiServer(deps: ApiDeps) {
 
   // --- Connections overview ---
 
-  app.get('/api/connections', (c) => {
+  app.get('/api/connections', async (c) => {
     if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
-    return c.json(deps.skillRegistry.getConnections());
+    const connections = deps.skillRegistry.getConnections();
+
+    if (!deps.connectionManager) {
+      return c.json(connections);
+    }
+
+    // Enrich with expiry info
+    const entities = [
+      ...deps.skillRegistry.list()
+        .filter((s) => s.config?.oauth)
+        .flatMap((s) =>
+          Object.entries(s.config!.oauth!).map(([secretKey, flowConfig]) => ({
+            dir: s.filePath,
+            name: s.metadata.name,
+            secretKey,
+            oauth: s.config!.oauth,
+            provider: flowConfig.provider,
+          }))
+        ),
+      ...(deps.channelRegistry?.list() ?? [])
+        .filter((ch) => ch.config?.oauth)
+        .flatMap((ch) =>
+          Object.entries(ch.config!.oauth!).map(([secretKey, flowConfig]) => ({
+            dir: ch.filePath,
+            name: ch.metadata.name,
+            secretKey,
+            oauth: ch.config!.oauth,
+            provider: flowConfig.provider,
+          }))
+        ),
+    ];
+
+    const statuses = await deps.connectionManager.getConnectionStatus(entities);
+    return c.json({ skillConnections: connections, connectionStatus: statuses });
   });
 
   // --- Inline per-skill OAuth credentials ---
@@ -928,6 +966,49 @@ export function createApiServer(deps: ApiDeps) {
     const ok = await deps.skillRegistry.setOAuthCredentials(name, key, clientId, clientSecret);
     if (!ok) return c.json({ error: 'Skill not found' }, 404);
     return c.json({ success: true });
+  });
+
+  app.put('/api/skills/:name/source', async (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    const name = c.req.param('name');
+    const body = await c.req.json<{ skillMd?: string; toolServerPy?: string; requirementsTxt?: string }>();
+    try {
+      const ok = await deps.skillRegistry.updateSource(name, body);
+      if (!ok) return c.json({ error: 'Skill not found' }, 404);
+      return c.json({ success: true });
+    } catch (err) {
+      log.error(err, 'Failed to update skill source');
+      const msg = err instanceof Error ? err.message : 'Failed to update skill source';
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  // --- Channel OAuth endpoints ---
+
+  app.put('/api/channels/:name/oauth-provider/:key', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    const key = c.req.param('key');
+    const { clientId, clientSecret } = await c.req.json<{ clientId: string; clientSecret: string }>();
+    if (!clientId || !clientSecret) return c.json({ error: 'Missing clientId or clientSecret' }, 400);
+    const ok = await deps.channelRegistry.setOAuthCredentials(name, key, clientId, clientSecret);
+    if (!ok) return c.json({ error: 'Channel not found' }, 404);
+    return c.json({ success: true });
+  });
+
+  app.put('/api/channels/:name/source', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    const body = await c.req.json<{ channelMd?: string; handlerJs?: string }>();
+    try {
+      const ok = await deps.channelRegistry.updateSource(name, body);
+      if (!ok) return c.json({ error: 'Channel not found' }, 404);
+      return c.json({ success: true });
+    } catch (err) {
+      log.error(err, 'Failed to update channel source');
+      const msg = err instanceof Error ? err.message : 'Failed to update channel source';
+      return c.json({ error: msg }, 500);
+    }
   });
 
   return app;

@@ -17,6 +17,7 @@ import { OAuthHandler } from './oauth/handler.js';
 import { ConversationDatabase } from './storage/database.js';
 import { ChannelRegistry } from './channels/registry.js';
 import { ChannelPairingService } from './channels/pairing.js';
+import { ConnectionManager } from './connections/manager.js';
 
 const log = createLogger('jonas');
 
@@ -49,6 +50,8 @@ async function main() {
           QDRANT_URL: process.env.QDRANT_URL ?? 'http://localhost:6333',
           VOYAGE_API_KEY: process.env.VOYAGE_API_KEY ?? '',
           VAULT_PATH: process.env.VAULT_PATH ?? '/data/vault',
+          AGENT_API_TOKEN: process.env.AGENT_API_TOKEN ?? '',
+          AGENT_API_URL: `http://localhost:${process.env.AGENT_PORT ?? 3001}`,
         },
       },
     },
@@ -58,14 +61,53 @@ async function main() {
 
   // Initialize skill registry
   const skillCrypto = new SkillCryptoStore();
-  const skillRegistry = new SkillRegistry(skillCrypto);
+
+  // Initialize OAuth provider store early (needed by ConnectionManager)
+  const oauthProviderStore = new OAuthProviderStore(skillCrypto);
+  await oauthProviderStore.load();
+
+  // Initialize connection manager for OAuth token refresh
+  const connectionManager = new ConnectionManager(skillCrypto, oauthProviderStore);
+
+  const skillRegistry = new SkillRegistry(skillCrypto, connectionManager);
   await skillRegistry.load();
   log.info({ skills: skillRegistry.list().length }, 'Skill registry loaded');
 
   // Initialize channel registry
-  const channelRegistry = new ChannelRegistry(skillCrypto);
+  const channelRegistry = new ChannelRegistry(skillCrypto, '/data', connectionManager);
   await channelRegistry.load();
   log.info({ channels: channelRegistry.list().length }, 'Channel registry loaded');
+
+  // Initial token refresh sweep for all OAuth entities
+  const allEntities = [
+    ...skillRegistry.list()
+      .filter((s) => s.config?.oauth)
+      .map((s) => ({ dir: s.filePath, oauth: s.config!.oauth })),
+    ...channelRegistry.list()
+      .filter((ch) => ch.config?.oauth)
+      .map((ch) => ({ dir: ch.filePath, oauth: ch.config!.oauth })),
+  ];
+  if (allEntities.length > 0) {
+    log.info({ count: allEntities.length }, 'Running initial OAuth token refresh sweep');
+    connectionManager.refreshAll(allEntities).catch((err) => {
+      log.error({ err }, 'Initial token refresh sweep failed');
+    });
+  }
+
+  // Background refresh every 30 minutes
+  setInterval(() => {
+    const entities = [
+      ...skillRegistry.list()
+        .filter((s) => s.config?.oauth)
+        .map((s) => ({ dir: s.filePath, oauth: s.config!.oauth })),
+      ...channelRegistry.list()
+        .filter((ch) => ch.config?.oauth)
+        .map((ch) => ({ dir: ch.filePath, oauth: ch.config!.oauth })),
+    ];
+    connectionManager.refreshAll(entities).catch((err) => {
+      log.error({ err }, 'Background token refresh sweep failed');
+    });
+  }, 30 * 60 * 1000);
 
   // Auto-start enabled channels
   for (const channel of channelRegistry.list()) {
@@ -79,9 +121,7 @@ async function main() {
     }
   }
 
-  // Initialize OAuth
-  const oauthProviderStore = new OAuthProviderStore(skillCrypto);
-  await oauthProviderStore.load();
+  // Initialize OAuth handler
   const oauthRedirectDomain = process.env.OAUTH_REDIRECT_DOMAIN;
   const oauthRedirectUri = oauthRedirectDomain
     ? `${oauthRedirectDomain}/oauth/callback`
@@ -89,9 +129,10 @@ async function main() {
   const oauthHandler = new OAuthHandler({
     providerStore: oauthProviderStore,
     skillRegistry,
-    redirectUri: oauthRedirectUri
+    channelRegistry,
+    redirectUri: oauthRedirectUri,
   });
-  log.info({ redirectUri: oauthRedirectUri || 'http://localhost:3000/oauth/callback' }, 'OAuth provider store loaded');
+  log.info({ redirectUri: oauthRedirectUri || 'http://localhost:3000/oauth/callback' }, 'OAuth handler initialized');
 
   // Initialize channel pairing service
   const pairingService = new ChannelPairingService();
@@ -123,7 +164,7 @@ async function main() {
   log.info('Task scheduler started');
 
   // Start internal API server
-  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler, database, channelRegistry, pairingService });
+  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler, database, channelRegistry, pairingService, connectionManager });
   const port = Number(process.env.AGENT_PORT ?? 3001);
 
   const { serve } = await import('@hono/node-server');
