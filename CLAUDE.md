@@ -7,11 +7,9 @@ Always-on personal AI assistant running in Docker. Uses Claude Pro (OAuth) via t
 - Runtime: Node.js 22
 - Package Manager: pnpm (REQUIRED)
 - Agent SDK: `@anthropic-ai/claude-agent-sdk` with Pro OAuth
-- Chat: Conduit (Matrix) + Element Web
 - Vector DB: Qdrant + Voyage AI embeddings
 - Dashboard: Hono + HTMX (SSH tunnel only)
 - Build: tsup + turbo
-- Reverse Proxy: nginx + certbot
 
 ## Monorepo Structure
 - `apps/dashboard` — Hono + HTMX management UI (SSH tunnel only)
@@ -19,9 +17,10 @@ Always-on personal AI assistant running in Docker. Uses Claude Pro (OAuth) via t
 - `services/gateway` — WebSocket gateway for Claude Code CLI access
 - `packages/shared` — Shared types and utilities
 - `packages/acp-bridge` — Local CLI: ACP <> Gateway translator
+- `packages/mcp-gateway-bridge` — Local CLI: MCP <> Gateway translator
 - `packages/config` — Shared tsconfig
-- `deploy/` — nginx, conduit, element-web, qdrant configs
-- `data/` — Runtime data (gitignored): vault, custom skills
+- `deploy/` — qdrant configs
+- `.volumes/` — Runtime data (gitignored): vault, custom skills
 - `scripts/` — Setup, backup, health check, SSH tunnel helpers
 
 ## Commands
@@ -36,7 +35,7 @@ Always-on personal AI assistant running in Docker. Uses Claude Pro (OAuth) via t
 
 ## Environment Variables
 See `env.example` for all required variables. Copy to `.env` and fill in values.
-Key variables: CLAUDE_CODE_OAUTH_TOKEN, VOYAGE_API_KEY, MATRIX_BOT_PASSWORD, GATEWAY_TOKEN, DOMAIN
+Key variables: CLAUDE_CODE_OAUTH_TOKEN, VOYAGE_API_KEY, GATEWAY_TOKEN, DOMAIN
 
 ## Security
 - Dashboard binds 127.0.0.1 only (SSH tunnel required)
@@ -44,3 +43,7 @@ Key variables: CLAUDE_CODE_OAUTH_TOKEN, VOYAGE_API_KEY, MATRIX_BOT_PASSWORD, GAT
 - Internal Docker network isolates services
 - Agent cannot read .env or secret files via tools
 - All tool invocations are audit-logged
+
+## More Information
+- Make yourself familiar with `jonas`. Look in the `.claude/docs` and `.volumes/agent-date` for
+  information

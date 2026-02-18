@@ -18,23 +18,6 @@ interface OAuthFlowConfig {
   scopes: string[];
 }
 
-interface Connection {
-  skillDirName: string;
-  skillName: string;
-  secretKey: string;
-  provider: string;
-  connected: boolean;
-  scopes: string[];
-}
-
-// /api/connections returns Connection[] or { skillConnections, connectionStatus } depending on agent version
-type ConnectionsResponse = Connection[] | { skillConnections: Connection[]; connectionStatus: unknown[] };
-
-function parseConnections(raw: ConnectionsResponse): Connection[] {
-  if (Array.isArray(raw)) return raw;
-  return raw.skillConnections ?? [];
-}
-
 function channelPairingType(name: string): string {
   return `channel:${name}`;
 }
@@ -384,76 +367,6 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
   `;
 }
 
-function renderOAuthConnections(connections: Connection[]): string {
-  if (connections.length === 0) {
-    return '<p class="meta">No OAuth connections configured.</p>';
-  }
-
-  const rows = connections
-    .map((conn) => {
-      const skillUrl = `/skills/${encodeURIComponent(conn.skillDirName)}`;
-      const connectParams = new URLSearchParams({
-        provider: conn.provider,
-        scopes: conn.scopes.join(','),
-      });
-      const connectUrl = `/oauth/connect/${encodeURIComponent(conn.skillDirName)}/${encodeURIComponent(conn.secretKey)}?${connectParams.toString()}`;
-
-      let actionHtml: string;
-      let setupPanel = '';
-      if (conn.connected) {
-        actionHtml = `
-          <a href="${connectUrl}" class="btn btn--sm">Reconnect</a>
-          <button class="btn btn--sm btn--danger"
-            hx-post="/skills/${encodeURIComponent(conn.skillDirName)}/values/${encodeURIComponent(conn.secretKey)}/delete"
-            hx-target="body" hx-swap="none"
-            hx-on::after-request="location.reload()"
-            hx-confirm="Disconnect ${conn.provider} from ${conn.skillName}?"
-          >Disconnect</button>`;
-      } else {
-        actionHtml = `
-          <button class="btn btn--sm"
-            onclick="this.closest('tr').nextElementSibling.toggleAttribute('hidden')"
-          >Setup ${conn.provider}</button>`;
-        setupPanel = `
-          <tr class="setup-panel" hidden>
-            <td colspan="4">
-              <div class="card" style="margin:0.5rem 0">
-                <p class="meta" style="margin-bottom:0.5rem">
-                  1. Go to the <strong>${conn.provider}</strong> developer console and create an OAuth app<br>
-                  2. Set redirect URI to: <code>http://localhost:3000/oauth/callback</code><br>
-                  3. Paste the credentials below
-                </p>
-                <form method="post" action="/skills/${encodeURIComponent(conn.skillDirName)}/oauth-setup/${encodeURIComponent(conn.secretKey)}"
-                      style="display:flex;flex-direction:column;gap:0.5rem;max-width:400px">
-                  <label class="meta">Client ID</label>
-                  <input type="text" name="clientId" required placeholder="your-client-id">
-                  <label class="meta">Client Secret</label>
-                  <input type="text" name="clientSecret" required placeholder="your-client-secret">
-                  <button type="submit" class="btn" style="align-self:flex-start">Save &amp; Connect</button>
-                </form>
-              </div>
-            </td>
-          </tr>`;
-      }
-
-      return `
-        <tr>
-          <td><a href="${skillUrl}">${conn.skillName}</a></td>
-          <td><code>${conn.provider}</code></td>
-          <td><span class="badge ${conn.connected ? 'badge--green' : 'badge--red'}">${conn.connected ? 'connected' : 'not connected'}</span></td>
-          <td style="display:flex;gap:0.5rem">${actionHtml}</td>
-        </tr>
-        ${setupPanel}`;
-    })
-    .join('');
-
-  return `
-    <table>
-      <thead><tr><th>Skill</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
-
 // --- Routes ---
 
 function renderChannelOAuthConnections(channels: PlatformChannel[]): string {
@@ -532,15 +445,8 @@ function renderChannelOAuthConnections(channels: PlatformChannel[]): string {
 
 app.get('/channels', async (c) => {
   try {
-    const [channelsRes, connectionsRes] = await Promise.all([
-      fetch(`${AGENT_URL()}/api/channels`),
-      fetch(`${AGENT_URL()}/api/connections`),
-    ]);
+    const channelsRes = await fetch(`${AGENT_URL()}/api/channels`);
     const channels = (await channelsRes.json()) as PlatformChannel[];
-    const rawConnections = connectionsRes.ok
-      ? ((await connectionsRes.json()) as ConnectionsResponse)
-      : [];
-    const connections = parseConnections(rawConnections);
 
     const channelOAuthRows = renderChannelOAuthConnections(channels);
 
@@ -568,17 +474,12 @@ app.get('/channels', async (c) => {
         </div>
       </div>`;
 
-    const skillOAuthSection = connections.length > 0 ? `
-      <h2 style="margin-top:2rem">Skill OAuth Connections</h2>
-      ${renderOAuthConnections(connections)}
-    ` : '';
-
     const channelOAuthSection = channelOAuthRows ? `
-      <h2 style="margin-top:2rem">Channel OAuth Connections</h2>
+      <h2 style="margin-top:2rem">Connections</h2>
       ${channelOAuthRows}
     ` : '';
 
-    return c.html(layout('Channels', `<h1>Channels</h1>${importForm}${renderChannels(channels)}${skillOAuthSection}${channelOAuthSection}`));
+    return c.html(layout('Channels', `<h1>Channels</h1>${importForm}${renderChannels(channels)}${channelOAuthSection}`));
   } catch {
     return c.html(
       layout('Channels', '<h1>Channels</h1><p class="badge badge--red">Agent unreachable</p>'),
