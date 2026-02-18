@@ -5,6 +5,7 @@ import type { PlatformChannel } from '@jonas/shared/types';
 const app = new Hono();
 
 const AGENT_URL = () => process.env.AGENT_API_URL ?? 'http://localhost:3001';
+const OAUTH_REDIRECT_URI = `${(process.env.OAUTH_REDIRECT_DOMAIN ?? 'http://localhost:3000').replace(/\/$/, '')}/oauth/callback`;
 
 interface PairingStatus {
   required: boolean;
@@ -229,7 +230,7 @@ function renderChannelRequirements(channel: PlatformChannel): string {
           <div class="card" style="margin:0.5rem 0">
             <p class="meta" style="margin-bottom:0.5rem">
               1. Go to the <strong>${flow.provider}</strong> developer console and create an OAuth app<br>
-              2. Set redirect URI to: <code>${process.env.OAUTH_REDIRECT_DOMAIN ? `${process.env.OAUTH_REDIRECT_DOMAIN}/oauth/callback` : 'http://localhost:3000/oauth/callback'}</code><br>
+              2. Set redirect URI to: <code>${OAUTH_REDIRECT_URI}</code><br>
               3. Paste the credentials below
             </p>
             <form method="post" action="/channels/${id}/oauth-setup/${encodeURIComponent(key)}"
@@ -408,7 +409,7 @@ function renderChannelOAuthConnections(channels: PlatformChannel[]): string {
               <div class="card" style="margin:0.5rem 0">
                 <p class="meta" style="margin-bottom:0.5rem">
                   1. Go to the <strong>${flow.provider}</strong> developer console and create an OAuth app<br>
-                  2. Set redirect URI to: <code>${process.env.OAUTH_REDIRECT_DOMAIN ? `${process.env.OAUTH_REDIRECT_DOMAIN}/oauth/callback` : 'http://localhost:3000/oauth/callback'}</code><br>
+                  2. Set redirect URI to: <code>${OAUTH_REDIRECT_URI}</code><br>
                   3. Paste the credentials below
                 </p>
                 <form method="post" action="/channels/${encodeURIComponent(ch.dirName)}/oauth-setup/${encodeURIComponent(key)}"
