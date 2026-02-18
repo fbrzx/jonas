@@ -19,24 +19,25 @@ interface CliResult {
 export class ClaudeProvider implements ModelProvider {
   private claudeBin: string;
   private mcpConfigPath: string;
+  private model: string;
 
-  constructor(claudeBin: string, mcpConfigPath: string) {
+  constructor(claudeBin: string, mcpConfigPath: string, model: string) {
     this.claudeBin = claudeBin;
     this.mcpConfigPath = mcpConfigPath;
+    this.model = model;
   }
 
   getName(): string {
-    // Extract model name from env or use default
-    const model = process.env.AGENT_DEFAULT_MODEL ?? 'claude-sonnet-4-5-20250929';
-    return `claude:${model}`;
+    return `claude:${this.model}`;
   }
 
   query(opts: QueryOptions): Promise<string> {
     return new Promise((resolve, reject) => {
+      const model = opts.model ?? this.model;
       const args = [
         '--print',
         '--output-format', 'json',
-        '--model', opts.model,
+        '--model', model,
         '--max-turns', '10',
         '--system-prompt', opts.systemPrompt,
         '--permission-mode', 'bypassPermissions',

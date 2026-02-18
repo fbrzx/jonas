@@ -18,8 +18,11 @@ if (!urlArg || !tokenArg) {
 const sessionStore = new SessionStore();
 const sessionKey = sessionStore.getOrCreate();
 
-const wsUrl = `${urlArg}?token=${encodeURIComponent(tokenArg)}&session=${sessionKey}`;
-const ws = new WebSocket(wsUrl);
+const ws = new WebSocket(urlArg, {
+  headers: {
+    Authorization: `Bearer ${tokenArg}`,
+  },
+});
 const translator = new GatewayTranslator(ws);
 
 const rl = createInterface({

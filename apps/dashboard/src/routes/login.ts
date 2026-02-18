@@ -42,6 +42,9 @@ app.get('/login', (c) => c.html(renderLoginPage()));
 
 app.post('/login', async (c) => {
   const expected = (process.env.DASHBOARD_TOKEN ?? '').trim();
+  const useSecureCookie =
+    process.env.NODE_ENV === 'production'
+    || (process.env.DASHBOARD_COOKIE_SECURE ?? '').toLowerCase() === 'true';
   if (!expected) {
     return c.text('DASHBOARD_TOKEN is not configured', 503);
   }
@@ -53,15 +56,20 @@ app.post('/login', async (c) => {
   }
 
   const cookieValue = encodeURIComponent(authCookieValue(expected));
+  const secureAttr = useSecureCookie ? '; Secure' : '';
   c.header(
     'Set-Cookie',
-    `dashboard_token=${cookieValue}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800`
+    `dashboard_token=${cookieValue}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${secureAttr}`
   );
   return c.redirect('/');
 });
 
 app.post('/logout', (c) => {
-  c.header('Set-Cookie', 'dashboard_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+  const useSecureCookie =
+    process.env.NODE_ENV === 'production'
+    || (process.env.DASHBOARD_COOKIE_SECURE ?? '').toLowerCase() === 'true';
+  const secureAttr = useSecureCookie ? '; Secure' : '';
+  c.header('Set-Cookie', `dashboard_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureAttr}`);
   return c.redirect('/login');
 });
 

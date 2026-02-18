@@ -15,6 +15,15 @@ const log = createLogger('gateway');
 
 const AGENT_BASE_URL =
   process.env.AGENT_BASE_URL ?? process.env.AGENT_API_URL ?? 'http://agent:3001';
+const AGENT_API_TOKEN = (process.env.AGENT_API_TOKEN ?? '').trim();
+
+function agentHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...extra };
+  if (AGENT_API_TOKEN) {
+    headers['x-agent-token'] = AGENT_API_TOKEN;
+  }
+  return headers;
+}
 
 export function createGatewayServer(port: number) {
   const sessions = new SessionManager();
@@ -22,7 +31,7 @@ export function createGatewayServer(port: number) {
   const wss = new WebSocketServer({ noServer: true });
 
   httpServer.on('upgrade', (req, socket, head) => {
-    const token = extractToken(req.url ?? '');
+    const token = extractToken(req);
     if (!token || !validateToken(token)) {
       log.warn('WebSocket upgrade rejected: invalid token');
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -162,7 +171,7 @@ async function handleChatSend(
 
   const res = await fetch(`${AGENT_BASE_URL}/api/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       message,
       channel,
@@ -242,7 +251,7 @@ async function handleChatAbort(
 ) {
   const res = await fetch(`${AGENT_BASE_URL}/api/chat/abort`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ sessionKey }),
   });
 
@@ -271,7 +280,7 @@ async function handleSessionsReset(
 ) {
   const res = await fetch(`${AGENT_BASE_URL}/api/chat/reset`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: agentHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ sessionKey }),
   });
 
@@ -283,7 +292,9 @@ async function handleSessionsReset(
  * Fetches the agent status.
  */
 async function handleStatus(ws: WebSocket, frame: GatewayRequest) {
-  const res = await fetch(`${AGENT_BASE_URL}/api/status`);
+  const res = await fetch(`${AGENT_BASE_URL}/api/status`, {
+    headers: agentHeaders(),
+  });
   const data = await res.json();
   ws.send(serializeResponse(frame.id, data));
 }

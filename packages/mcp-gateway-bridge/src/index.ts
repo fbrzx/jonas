@@ -36,7 +36,7 @@ if (!urlArg || !tokenArg) {
   process.exit(1);
 }
 
-const GATEWAY_URL = `${urlArg}?token=${encodeURIComponent(tokenArg)}`;
+const GATEWAY_URL = urlArg;
 
 // WebSocket connection state
 let ws: WebSocket | null = null;
@@ -49,7 +49,11 @@ const pendingRequests = new Map<string, {
 
 function connectGateway(): Promise<void> {
   return new Promise((resolve, reject) => {
-    ws = new WebSocket(GATEWAY_URL);
+    ws = new WebSocket(GATEWAY_URL, {
+      headers: {
+        Authorization: `Bearer ${tokenArg}`,
+      },
+    });
     sessionKey = createId('sess');
 
     ws.on('open', () => {

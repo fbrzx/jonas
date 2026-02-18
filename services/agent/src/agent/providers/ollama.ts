@@ -43,7 +43,7 @@ export class OllamaProvider implements ModelProvider {
     const url = `${this.baseUrl}/api/chat`;
 
     const requestBody: OllamaChatRequest = {
-      model: opts.model,
+      model: this.model,
       messages: [
         { role: 'system', content: opts.systemPrompt },
         { role: 'user', content: opts.prompt },
@@ -52,7 +52,7 @@ export class OllamaProvider implements ModelProvider {
     };
 
     try {
-      log.info({ url, model: opts.model }, 'Sending request to Ollama');
+      log.info({ url, model: this.model }, 'Sending request to Ollama');
 
       const controller = new AbortController();
 

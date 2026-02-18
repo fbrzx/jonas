@@ -21,7 +21,7 @@ export interface ModelProvider {
 export interface QueryOptions {
   prompt: string;
   systemPrompt: string;
-  model: string;
+  model?: string;
   signal: AbortSignal;
 }
 

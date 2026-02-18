@@ -15,6 +15,50 @@ import loginRoutes from './routes/login.js';
 
 const log = createLogger('dashboard');
 const app = new Hono();
+const AGENT_API_URL = process.env.AGENT_API_URL ?? 'http://localhost:3001';
+const AGENT_API_TOKEN = (process.env.AGENT_API_TOKEN ?? '').trim();
+
+const agentOrigin = (() => {
+  try {
+    return new URL(AGENT_API_URL).origin;
+  } catch {
+    return null;
+  }
+})();
+
+const originalFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (
+  input: Parameters<typeof originalFetch>[0],
+  init?: Parameters<typeof originalFetch>[1],
+): Promise<Response> => {
+  if (!AGENT_API_TOKEN || !agentOrigin) {
+    return originalFetch(input, init);
+  }
+
+  let url: URL;
+  try {
+    if (typeof input === 'string') {
+      if (!input.startsWith('http://') && !input.startsWith('https://')) {
+        return originalFetch(input, init);
+      }
+      url = new URL(input);
+    } else if (input instanceof URL) {
+      url = input;
+    } else {
+      url = new URL(input.url);
+    }
+  } catch {
+    return originalFetch(input, init);
+  }
+
+  if (url.origin !== agentOrigin) {
+    return originalFetch(input, init);
+  }
+
+  const headers = new Headers(init?.headers);
+  headers.set('x-agent-token', AGENT_API_TOKEN);
+  return originalFetch(input, { ...init, headers });
+};
 
 function authCookieValue(token: string): string {
   return createHash('sha256').update(token).digest('hex');

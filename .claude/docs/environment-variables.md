@@ -9,7 +9,7 @@ This document lists all environment variables used by the Jonas agent.
   - Options: `claude`, `ollama`
 
 ### Claude Configuration (when `MODEL_PROVIDER=claude`)
-- `AGENT_DEFAULT_MODEL` - Claude model to use (default: `claude-sonnet-4-5-20250929`)
+- `CLAUDE_MODEL` - Claude model to use (default: `claude-sonnet-4-5-20250929`)
 - `CLAUDE_CODE_OAUTH_TOKEN` - OAuth token for Claude Pro access (required)
 
 ### Ollama Configuration (when `MODEL_PROVIDER=ollama`)

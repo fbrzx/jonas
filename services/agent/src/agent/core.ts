@@ -105,7 +105,6 @@ export class AgentCore {
     // Build prompt with conversation history for context
     const prompt = this.buildPromptWithHistory(session.messages, userMessage);
 
-    const model = process.env.AGENT_DEFAULT_MODEL ?? 'claude-sonnet-4-5-20250929';
     const abortController = new AbortController();
     this.abortControllers.set(key, abortController);
 
@@ -117,7 +116,6 @@ export class AgentCore {
       fullResponse = await this.provider.query({
         prompt,
         systemPrompt,
-        model,
         signal: abortController.signal,
       });
 

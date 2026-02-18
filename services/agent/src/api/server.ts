@@ -32,8 +32,44 @@ interface ApiDeps {
 
 export function createApiServer(deps: ApiDeps) {
   const app = new Hono();
+  const allowedOrigins = (process.env.AGENT_CORS_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
-  app.use('*', cors({ origin: '*' }));
+  if (allowedOrigins.length > 0) {
+    app.use('/api/*', cors({
+      origin: allowedOrigins,
+      allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowHeaders: ['Content-Type', 'Authorization', 'x-agent-token'],
+    }));
+  }
+
+  const agentApiToken = (process.env.AGENT_API_TOKEN ?? '').trim();
+  if (!agentApiToken) {
+    log.warn('AGENT_API_TOKEN is not set; agent API is running without token authentication');
+  }
+
+  app.use('/api/*', async (c, next) => {
+    // Skip authentication for health check endpoint and OPTIONS requests
+    if (!agentApiToken || c.req.method === 'OPTIONS' || c.req.path === '/api/status') {
+      await next();
+      return;
+    }
+
+    const authHeader = c.req.header('authorization') ?? '';
+    const bearerToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
+    const headerToken = (c.req.header('x-agent-token') ?? '').trim();
+    const token = headerToken || bearerToken;
+
+    if (token !== agentApiToken) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    await next();
+  });
 
   // --- Channel pairing endpoints ---
 

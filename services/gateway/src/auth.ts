@@ -2,6 +2,9 @@
  * Token-based authentication for WebSocket connections.
  */
 
+import type http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
+
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN ?? '';
 
 /**
@@ -10,19 +13,40 @@ const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN ?? '';
  */
 export function validateToken(token: string): boolean {
   if (!GATEWAY_TOKEN) return false;
-  return token === GATEWAY_TOKEN;
+
+  const provided = Buffer.from(token);
+  const expected = Buffer.from(GATEWAY_TOKEN);
+  if (provided.length !== expected.length) return false;
+
+  return timingSafeEqual(provided, expected);
 }
 
 /**
- * Extracts the `token` query parameter from a WebSocket URL.
- * Expects URLs like `ws://host:port/?token=abc123` or `/path?token=abc123`.
+ * Extracts auth token from the WebSocket upgrade request.
+ * Supported formats:
+ * - Authorization: Bearer <token>
+ * - X-Gateway-Token: <token>
+ * - Sec-WebSocket-Protocol: auth-token,<token>
  */
-export function extractToken(url: string): string | null {
-  try {
-    // Handle relative URLs by prepending a base
-    const parsed = new URL(url, 'http://localhost');
-    return parsed.searchParams.get('token');
-  } catch {
-    return null;
+export function extractToken(req: http.IncomingMessage): string | null {
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    if (token) return token;
   }
+
+  const headerToken = req.headers['x-gateway-token'];
+  if (typeof headerToken === 'string' && headerToken.trim()) {
+    return headerToken.trim();
+  }
+
+  const protocolHeader = req.headers['sec-websocket-protocol'];
+  if (typeof protocolHeader === 'string' && protocolHeader.trim()) {
+    const parts = protocolHeader.split(',').map((part) => part.trim());
+    if (parts.length >= 2 && parts[0] === 'auth-token' && parts[1]) {
+      return parts[1];
+    }
+  }
+
+  return null;
 }

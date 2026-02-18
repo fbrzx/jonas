@@ -9,8 +9,9 @@ services:
       - VOYAGE_API_KEY=${VOYAGE_API_KEY}
       - QDRANT_URL=http://qdrant:6333
       - AGENT_PORT=3001
-      - AGENT_DEFAULT_MODEL=${AGENT_DEFAULT_MODEL:-claude-sonnet-4-5-20250929}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-5-20250929}
       - AGENT_MAX_ACTIONS_PER_MINUTE=${AGENT_MAX_ACTIONS_PER_MINUTE:-30}
+      - AGENT_API_TOKEN=${AGENT_API_TOKEN}
       - VAULT_PATH=/data/vault
       - DB_PATH=/data/conversations.db
       - SKILLS_ENCRYPTION_KEY=${SKILLS_ENCRYPTION_KEY:-}
@@ -42,6 +43,7 @@ services:
       - GATEWAY_PORT=18789
       - GATEWAY_TOKEN=${GATEWAY_TOKEN}
       - AGENT_API_URL=http://agent:3001
+      - AGENT_API_TOKEN=${AGENT_API_TOKEN}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     ports:
       - "18789:18789"
@@ -60,8 +62,10 @@ services:
       - DASHBOARD_PORT=3000
       - DASHBOARD_TOKEN=${DASHBOARD_TOKEN}
       - AGENT_API_URL=http://agent:3001
+      - AGENT_API_TOKEN=${AGENT_API_TOKEN}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - DOMAIN=${DOMAIN:-localhost}
+      - DASHBOARD_COOKIE_SECURE=${DASHBOARD_COOKIE_SECURE:-false}
     ports:
       - "127.0.0.1:3000:3000"
     networks:
