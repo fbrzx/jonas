@@ -1,14 +1,22 @@
 const NAV_ITEMS = [
-  { href: '/', label: 'Status' },
   { href: '/chat', label: 'Chat' },
   { href: '/memory', label: 'Memory' },
-  { href: '/skills', label: 'Skills' },
-  { href: '/channels', label: 'Channels' },
+  { href: '/ext', label: 'Ext' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/audit', label: 'Audit' },
 ];
 
 const instanceInfo = process.env.DOMAIN || '';
+const defaultIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#22d3ee"/>
+  <circle cx="32" cy="28" r="14" fill="#fed7aa"/>
+  <rect x="22" y="24" width="6" height="6" fill="#111827"/>
+  <rect x="36" y="24" width="6" height="6" fill="#111827"/>
+  <rect x="26" y="34" width="12" height="3" fill="#111827"/>
+  <rect x="14" y="46" width="36" height="12" rx="4" fill="#f97316"/>
+</svg>`;
+const defaultIconDataUri = `data:image/svg+xml,${encodeURIComponent(defaultIconSvg)}`;
+const jonasIconUrl = process.env.DASHBOARD_ICON_URL || '/assets/avatar.png';
 
 function getEnvironmentClass(domain: string): string {
   if (!domain) return 'env--local';
@@ -31,6 +39,7 @@ export function layout(title: string, content: string): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="${jonasIconUrl}">
   <title>${title} - Jonas on ${instanceInfo}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <style>
@@ -45,6 +54,25 @@ export function layout(title: string, content: string): string {
       background: #161b22; border-bottom: 1px solid #30363d;
       padding: 0.75rem 1.5rem; display: flex; gap: 1.5rem;
       align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 100;
+      transition: box-shadow 0.2s ease, background-color 0.2s ease, backdrop-filter 0.2s ease;
+    }
+    nav.nav--scrolled {
+      background: rgba(22, 27, 34, 0.82);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+    .nav-left { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+    .brand {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      color: #f0f6fc; text-decoration: none; font-size: 0.9rem; font-weight: 600;
+    }
+    .brand:hover { color: #f0f6fc; text-decoration: none; }
+    .brand-icon {
+      width: 24px; height: 24px; border-radius: 6px;
+      border: 1px solid #30363d; background: #0d1117;
+      image-rendering: pixelated;
     }
     .nav-links { display: flex; gap: 1.5rem; align-items: center; }
     .env-label {
@@ -73,6 +101,12 @@ export function layout(title: string, content: string): string {
     th, td {
       text-align: left; padding: 0.5rem 0.75rem;
       border-bottom: 1px solid #21262d;
+      vertical-align: middle;
+    }
+    .actions-col { white-space: nowrap; }
+    .table-actions {
+      display: flex; gap: 0.5rem; flex-wrap: wrap;
+      align-items: center;
     }
     th { color: #8b949e; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
     .card {
@@ -198,9 +232,27 @@ export function layout(title: string, content: string): string {
   </style>
 </head>
 <body>
-  <nav><div class="nav-links">${nav}</div>${envLabel}</nav>
+  <nav id="top-nav">
+    <div class="nav-left">
+      <a class="brand" href="/">
+        <img class="brand-icon" src="${jonasIconUrl}" alt="Jonas icon">
+        <span>Jonas</span>
+      </a>
+      <div class="nav-links">${nav}</div>
+    </div>
+    ${envLabel}
+  </nav>
   <main>${content}</main>
   <footer>Jonas Dashboard</footer>
+  <script>
+    (() => {
+      const nav = document.getElementById('top-nav');
+      if (!nav) return;
+      const sync = () => nav.classList.toggle('nav--scrolled', window.scrollY > 4);
+      sync();
+      window.addEventListener('scroll', sync, { passive: true });
+    })();
+  </script>
 </body>
 </html>`;
 }

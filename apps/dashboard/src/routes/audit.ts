@@ -29,10 +29,11 @@ interface AuditResponse {
 function renderFilters(currentAction: string, currentFrom: string, currentTo: string): string {
   return `
     <div class="card" style="margin-bottom:1rem">
-      <form hx-get="/audit" hx-target="#audit-table" hx-swap="innerHTML" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-end">
-        <div class="form-group" style="margin:0">
-          <label style="margin-bottom:0.25rem;font-size:0.85rem;display:block">Action</label>
-          <select name="action" style="width:auto;min-width:150px">
+      <form hx-get="/audit" hx-target="#audit-table" hx-swap="innerHTML"
+            style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;align-items:end">
+        <div style="display:flex;flex-direction:column;gap:0.25rem">
+          <label class="meta" style="font-size:0.8rem">Action</label>
+          <select name="action" style="width:100%;max-width:none">
             <option value="">All actions</option>
             <option value="chat" ${currentAction === 'chat' ? 'selected' : ''}>Chat</option>
             <option value="tool_use" ${currentAction === 'tool_use' ? 'selected' : ''}>Tool Use</option>
@@ -40,17 +41,17 @@ function renderFilters(currentAction: string, currentFrom: string, currentTo: st
           </select>
         </div>
 
-        <div class="form-group" style="margin:0">
-          <label style="margin-bottom:0.25rem;font-size:0.85rem;display:block">From</label>
-          <input type="datetime-local" name="from" value="${currentFrom}" style="width:auto">
+        <div style="display:flex;flex-direction:column;gap:0.25rem">
+          <label class="meta" style="font-size:0.8rem">From</label>
+          <input type="datetime-local" name="from" value="${currentFrom}" style="width:100%;max-width:none">
         </div>
 
-        <div class="form-group" style="margin:0">
-          <label style="margin-bottom:0.25rem;font-size:0.85rem;display:block">To</label>
-          <input type="datetime-local" name="to" value="${currentTo}" style="width:auto">
+        <div style="display:flex;flex-direction:column;gap:0.25rem">
+          <label class="meta" style="font-size:0.8rem">To</label>
+          <input type="datetime-local" name="to" value="${currentTo}" style="width:100%;max-width:none">
         </div>
 
-        <div style="margin:0;display:flex;gap:0.5rem;align-items:flex-end">
+        <div style="display:flex;gap:0.5rem;align-items:center;justify-content:flex-start;flex-wrap:wrap">
           <button type="submit" class="btn btn--sm">Filter</button>
           <button type="button" class="btn btn--sm" onclick="window.location.href='/audit'">Clear</button>
         </div>

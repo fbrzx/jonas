@@ -35,60 +35,6 @@ interface PlatformChannel {
   state: 'stopped' | 'starting' | 'running' | 'error';
 }
 
-interface Connection {
-  skillDirName: string;
-  skillName: string;
-  secretKey: string;
-  provider: string;
-  connected: boolean;
-  scopes: string[];
-}
-
-type ConnectionsResponse = Connection[] | { skillConnections: Connection[]; connectionStatus: unknown[] };
-
-function parseConnections(raw: ConnectionsResponse): Connection[] {
-  if (Array.isArray(raw)) return raw;
-  return raw.skillConnections ?? [];
-}
-
-// --- List page ---
-
-function renderSkills(skills: Skill[]): string {
-  if (skills.length === 0) {
-    return '<p class="meta">No skills installed. Add skill directories to <code>/data/skills/</code>.</p>';
-  }
-
-  const rows = skills
-    .map(
-      (s) => `
-      <tr>
-        <td><a href="/skills/${encodeURIComponent(s.dirName)}"><strong>${s.metadata.name}</strong></a><br><span class="meta">${s.metadata.description}</span></td>
-        <td>
-          ${s.hasPrompt ? '<span class="badge badge--blue">prompt</span> ' : ''}
-          ${s.hasTools ? '<span class="badge badge--blue">tools</span>' : ''}
-        </td>
-        <td>
-          <span class="badge ${s.status === 'enabled' ? 'badge--green' : 'badge--red'}">${s.status}</span>
-        </td>
-        <td>
-          <button
-            class="btn btn--sm"
-            hx-post="/skills/${encodeURIComponent(s.dirName)}/${s.status === 'enabled' ? 'disable' : 'enable'}"
-            hx-target="closest tr"
-            hx-swap="outerHTML"
-          >${s.status === 'enabled' ? 'Disable' : 'Enable'}</button>
-        </td>
-      </tr>`,
-    )
-    .join('');
-
-  return `
-    <table>
-      <thead><tr><th>Skill</th><th>Capabilities</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
-
 function renderSkillRow(s: Skill): string {
   const id = encodeURIComponent(s.dirName);
   return `
@@ -112,124 +58,7 @@ function renderSkillRow(s: Skill): string {
     </tr>`;
 }
 
-function renderOAuthConnections(connections: Connection[]): string {
-  if (connections.length === 0) {
-    return '<p class="meta">No OAuth connections configured.</p>';
-  }
-
-  const rows = connections
-    .map((conn) => {
-      const skillUrl = `/skills/${encodeURIComponent(conn.skillDirName)}`;
-      const connectParams = new URLSearchParams({
-        provider: conn.provider,
-        scopes: conn.scopes.join(','),
-      });
-      const connectUrl = `/oauth/connect/${encodeURIComponent(conn.skillDirName)}/${encodeURIComponent(conn.secretKey)}?${connectParams.toString()}`;
-
-      let actionHtml: string;
-      let setupPanel = '';
-      if (conn.connected) {
-        actionHtml = `
-          <a href="${connectUrl}" class="btn btn--sm">Reconnect</a>
-          <button class="btn btn--sm btn--danger"
-            hx-post="/skills/${encodeURIComponent(conn.skillDirName)}/values/${encodeURIComponent(conn.secretKey)}/delete"
-            hx-target="body" hx-swap="none"
-            hx-on::after-request="location.reload()"
-            hx-confirm="Disconnect ${conn.provider} from ${conn.skillName}?"
-          >Disconnect</button>`;
-      } else {
-        actionHtml = `
-          <button class="btn btn--sm"
-            onclick="this.closest('tr').nextElementSibling.toggleAttribute('hidden')"
-          >Setup ${conn.provider}</button>`;
-        setupPanel = `
-          <tr class="setup-panel" hidden>
-            <td colspan="4">
-              <div class="card" style="margin:0.5rem 0">
-                <p class="meta" style="margin-bottom:0.5rem">
-                  1. Go to the <strong>${conn.provider}</strong> developer console and create an OAuth app<br>
-                  2. Set redirect URI to: <code>http://localhost:3000/oauth/callback</code><br>
-                  3. Paste the credentials below
-                </p>
-                <form method="post" action="/skills/${encodeURIComponent(conn.skillDirName)}/oauth-setup/${encodeURIComponent(conn.secretKey)}"
-                      style="display:flex;flex-direction:column;gap:0.5rem;max-width:400px">
-                  <label class="meta">Client ID</label>
-                  <input type="text" name="clientId" required placeholder="your-client-id">
-                  <label class="meta">Client Secret</label>
-                  <input type="text" name="clientSecret" required placeholder="your-client-secret">
-                  <button type="submit" class="btn" style="align-self:flex-start">Save &amp; Connect</button>
-                </form>
-              </div>
-            </td>
-          </tr>`;
-      }
-
-      return `
-        <tr>
-          <td><a href="${skillUrl}">${conn.skillName}</a></td>
-          <td><code>${conn.provider}</code></td>
-          <td><span class="badge ${conn.connected ? 'badge--green' : 'badge--red'}">${conn.connected ? 'connected' : 'not connected'}</span></td>
-          <td style="display:flex;gap:0.5rem">${actionHtml}</td>
-        </tr>
-        ${setupPanel}`;
-    })
-    .join('');
-
-  return `
-    <table>
-      <thead><tr><th>Skill</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
-
-app.get('/skills', async (c) => {
-  try {
-    const [skillsRes, connectionsRes] = await Promise.all([
-      fetch(`${AGENT_URL()}/api/skills`),
-      fetch(`${AGENT_URL()}/api/connections`),
-    ]);
-    const data = (await skillsRes.json()) as Skill[];
-    const rawConnections = connectionsRes.ok
-      ? ((await connectionsRes.json()) as ConnectionsResponse)
-      : [];
-    const connections = parseConnections(rawConnections);
-
-    const importForm = `
-      <div style="margin-bottom:1rem">
-        <button class="btn btn--sm" onclick="document.getElementById('import-form').toggleAttribute('hidden')">
-          Import Skill (.zip)
-        </button>
-      </div>
-      <div id="import-form" hidden style="margin-bottom:1.5rem">
-        <div class="card">
-          <h3 style="margin-bottom:0.5rem">Import Skill from .zip</h3>
-          <form action="/skills/import" method="post" enctype="multipart/form-data"
-                style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
-            <input type="file" name="file" accept=".zip" required>
-            <label style="display:flex;align-items:center;gap:0.5rem">
-              <input type="checkbox" name="overwrite" value="true">
-              <span class="meta">Overwrite if skill already exists</span>
-            </label>
-            <div style="display:flex;gap:0.5rem">
-              <button type="submit" class="btn btn--sm">Import</button>
-              <button type="button" class="btn btn--sm" onclick="document.getElementById('import-form').toggleAttribute('hidden')">Cancel</button>
-            </div>
-          </form>
-        </div>
-      </div>`;
-
-    const connectionsSection = connections.length > 0 ? `
-      <h2 style="margin-top:2rem">Connections</h2>
-      ${renderOAuthConnections(connections)}
-    ` : '';
-
-    return c.html(layout('Skills', `<h1>Skills</h1>${importForm}${renderSkills(data)}${connectionsSection}`));
-  } catch {
-    return c.html(
-      layout('Skills', '<h1>Skills</h1><p class="badge badge--red">Agent unreachable</p>'),
-    );
-  }
-});
+app.get('/skills', (c) => c.redirect('/ext'));
 
 // --- Detail page ---
 
@@ -428,7 +257,7 @@ function renderSkillDetail(skill: Skill, channels: PlatformChannel[]): string {
   const configJson = skill.config ? JSON.stringify(skill.config, null, 2) : '{}';
 
   return `
-    <p><a href="/skills">&larr; Back to Skills</a></p>
+    <p><a href="/ext">&larr; Back to Extensions</a></p>
     <h1>${skill.metadata.name}</h1>
 
     <div class="card">
@@ -695,7 +524,7 @@ app.post('/skills/import', async (c) => {
           'Import Failed',
           `<h1>Import Failed</h1>
            <p class="badge badge--red">No file uploaded</p>
-           <p><a href="/skills">&larr; Back to Skills</a></p>`,
+           <p><a href="/ext">&larr; Back to Extensions</a></p>`,
         ),
       );
     }
@@ -722,7 +551,7 @@ app.post('/skills/import', async (c) => {
           'Import Failed',
           `<h1>Import Failed</h1>
            <p class="badge badge--red">${error.error || 'Unknown error'}</p>
-           <p><a href="/skills">&larr; Back to Skills</a></p>`,
+           <p><a href="/ext">&larr; Back to Extensions</a></p>`,
         ),
       );
     }
@@ -736,7 +565,7 @@ app.post('/skills/import', async (c) => {
         'Import Failed',
         `<h1>Import Failed</h1>
          <p class="badge badge--red">${message}</p>
-         <p><a href="/skills">&larr; Back to Skills</a></p>`,
+         <p><a href="/ext">&larr; Back to Extensions</a></p>`,
       ),
     );
   }

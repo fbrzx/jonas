@@ -104,7 +104,7 @@ app.get('/oauth/callback', async (c) => {
     const errorDesc = c.req.query('error_description');
     const errorMsg = errorDesc ? `${error}: ${errorDesc}` : error;
     return c.html(
-      layout('OAuth Error', `<h1>OAuth Error</h1><p class="badge badge--red">${errorMsg}</p><p><a href="/skills">&larr; Back to skills</a></p>`),
+      layout('OAuth Error', `<h1>OAuth Error</h1><p class="badge badge--red">${errorMsg}</p><p><a href="/ext">&larr; Back to extensions</a></p>`),
     );
   }
 
@@ -130,7 +130,7 @@ app.get('/oauth/callback', async (c) => {
 
     if (!res.ok || !data.success) {
       return c.html(
-        layout('OAuth Error', `<h1>OAuth Error</h1><p class="badge badge--red">${data.error ?? 'Token exchange failed'}</p><p><a href="/skills">&larr; Back to skills</a></p>`),
+        layout('OAuth Error', `<h1>OAuth Error</h1><p class="badge badge--red">${data.error ?? 'Token exchange failed'}</p><p><a href="/ext">&larr; Back to extensions</a></p>`),
       );
     }
 

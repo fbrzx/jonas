@@ -1,10 +1,14 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { createHash } from 'node:crypto';
+import { dirname, extname, join, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { createLogger } from '@jonas/shared/utils';
 import statusRoutes from './routes/status.js';
 import memoryRoutes from './routes/memory.js';
 import skillsRoutes from './routes/skills.js';
+import extensionsRoutes from './routes/extensions.js';
 import vaultRoutes from './routes/vault.js';
 import tasksRoutes from './routes/tasks.js';
 import auditRoutes from './routes/audit.js';
@@ -17,6 +21,61 @@ const log = createLogger('dashboard');
 const app = new Hono();
 const AGENT_API_URL = process.env.AGENT_API_URL ?? 'http://localhost:3001';
 const AGENT_API_TOKEN = (process.env.AGENT_API_TOKEN ?? '').trim();
+const runtimeDir = dirname(fileURLToPath(import.meta.url));
+const distAssetsDir = join(runtimeDir, 'assets');
+const srcAssetsDir = resolve(runtimeDir, '../src/assets');
+
+function contentTypeForAsset(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case '.svg':
+      return 'image/svg+xml';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    case '.ico':
+      return 'image/x-icon';
+    case '.gif':
+      return 'image/gif';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+async function readAssetFromKnownDirs(relativePath: string): Promise<Buffer | null> {
+  const candidatePaths = [join(distAssetsDir, relativePath), join(srcAssetsDir, relativePath)];
+  for (const candidate of candidatePaths) {
+    try {
+      return await readFile(candidate);
+    } catch {
+      // try next path
+    }
+  }
+  return null;
+}
+
+app.get('/assets/*', async (c) => {
+  const assetPath = c.req.path.replace(/^\/assets\//, '');
+  if (!assetPath || assetPath.includes('..') || assetPath.includes('\\')) {
+    return c.text('Asset not found', 404);
+  }
+
+  const file = await readAssetFromKnownDirs(assetPath);
+  if (!file) {
+    return c.text('Asset not found', 404);
+  }
+
+  return new Response(file, {
+    status: 200,
+    headers: {
+      'Content-Type': contentTypeForAsset(assetPath),
+      'Cache-Control': 'public, max-age=300',
+    },
+  });
+});
 
 const agentOrigin = (() => {
   try {
@@ -84,7 +143,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 
 app.use('*', async (c, next) => {
   const path = c.req.path;
-  if (path === '/health' || path === '/login' || path.startsWith('/oauth/')) {
+  if (path === '/health' || path === '/login' || path.startsWith('/oauth/') || path.startsWith('/assets/')) {
     await next();
     return;
   }
@@ -114,6 +173,7 @@ app.route('/', loginRoutes);
 app.route('/', chatRoutes);
 app.route('/', statusRoutes);
 app.route('/', memoryRoutes);
+app.route('/', extensionsRoutes);
 app.route('/', skillsRoutes);
 app.route('/', channelsRoutes);
 app.route('/', vaultRoutes);

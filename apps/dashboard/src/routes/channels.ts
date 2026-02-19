@@ -38,22 +38,6 @@ async function fetchPairingStatus(name: string): Promise<PairingStatus | null> {
 
 // --- Helper functions ---
 
-function renderChannels(channels: PlatformChannel[]): string {
-  if (channels.length === 0) {
-    return '<p class="meta">No channels installed. Import a channel package to get started.</p>';
-  }
-
-  const rows = channels
-    .map((ch) => renderChannelRow(ch))
-    .join('');
-
-  return `
-    <table>
-      <thead><tr><th>Channel</th><th>Platform</th><th>Mode</th><th>Status</th><th>State</th><th>Action</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
-
 function renderChannelRow(ch: PlatformChannel): string {
   const id = encodeURIComponent(ch.dirName);
   return `
@@ -273,7 +257,7 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
     </div>` : '';
 
   return `
-    <p><a href="/channels">&larr; Back to Channels</a></p>
+    <p><a href="/ext">&larr; Back to Extensions</a></p>
     <h1>${channel.metadata.name}</h1>
     <p class="meta" style="margin-bottom:1.5rem">${channel.metadata.description}</p>
 
@@ -370,123 +354,7 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
 
 // --- Routes ---
 
-function renderChannelOAuthConnections(channels: PlatformChannel[]): string {
-  // Collect OAuth connections from channel configs
-  const rows: string[] = [];
-
-  for (const ch of channels) {
-    const oauth = (ch.config?.oauth ?? {}) as Record<string, OAuthFlowConfig>;
-    for (const [key, flow] of Object.entries(oauth)) {
-      const tokenStored = (ch.secretKeys ?? []).includes(key);
-      const credsStored = (ch.secretKeys ?? []).includes(`__oauth_${key}_client_id`);
-      const connectParams = new URLSearchParams({
-        provider: flow.provider,
-        scopes: flow.scopes.join(','),
-        entityType: 'channel',
-      });
-      const connectUrl = `/oauth/connect/${encodeURIComponent(ch.dirName)}/${encodeURIComponent(key)}?${connectParams.toString()}`;
-      const channelUrl = `/channels/${encodeURIComponent(ch.dirName)}`;
-
-      let actionHtml: string;
-      let setupPanel = '';
-      if (tokenStored) {
-        actionHtml = `
-          <a href="${connectUrl}" class="btn btn--sm">Reconnect</a>
-          <button class="btn btn--sm btn--danger"
-            hx-post="/channels/${encodeURIComponent(ch.dirName)}/requirements/${encodeURIComponent(key)}/disconnect"
-            hx-target="body" hx-swap="none"
-            hx-on::after-request="location.reload()"
-            hx-confirm="Disconnect ${flow.provider} from ${ch.metadata.name}?"
-          >Disconnect</button>`;
-      } else {
-        actionHtml = `
-          <button class="btn btn--sm"
-            onclick="this.closest('tr').nextElementSibling.toggleAttribute('hidden')"
-          >Setup ${flow.provider}</button>`;
-        setupPanel = `
-          <tr class="setup-panel" hidden>
-            <td colspan="4">
-              <div class="card" style="margin:0.5rem 0">
-                <p class="meta" style="margin-bottom:0.5rem">
-                  1. Go to the <strong>${flow.provider}</strong> developer console and create an OAuth app<br>
-                  2. Set redirect URI to: <code>${OAUTH_REDIRECT_URI}</code><br>
-                  3. Paste the credentials below
-                </p>
-                <form method="post" action="/channels/${encodeURIComponent(ch.dirName)}/oauth-setup/${encodeURIComponent(key)}"
-                      style="display:flex;flex-direction:column;gap:0.5rem;max-width:400px">
-                  <label class="meta">Client ID</label>
-                  <input type="text" name="clientId" required placeholder="your-client-id">
-                  <label class="meta">Client Secret</label>
-                  <input type="text" name="clientSecret" required placeholder="your-client-secret">
-                  <button type="submit" class="btn" style="align-self:flex-start">Save &amp; Connect</button>
-                </form>
-              </div>
-            </td>
-          </tr>`;
-      }
-
-      rows.push(`
-        <tr>
-          <td><a href="${channelUrl}">${ch.metadata.name}</a></td>
-          <td><code>${flow.provider}</code></td>
-          <td><span class="badge ${tokenStored ? 'badge--green' : credsStored ? 'badge--yellow' : 'badge--red'}">${tokenStored ? 'connected' : credsStored ? 'ready' : 'not connected'}</span></td>
-          <td style="display:flex;gap:0.5rem">${actionHtml}</td>
-        </tr>
-        ${setupPanel}`);
-    }
-  }
-
-  if (rows.length === 0) return '';
-  return `
-    <table>
-      <thead><tr><th>Channel</th><th>Provider</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${rows.join('')}</tbody>
-    </table>`;
-}
-
-app.get('/channels', async (c) => {
-  try {
-    const channelsRes = await fetch(`${AGENT_URL()}/api/channels`);
-    const channels = (await channelsRes.json()) as PlatformChannel[];
-
-    const channelOAuthRows = renderChannelOAuthConnections(channels);
-
-    const importForm = `
-      <div style="margin-bottom:1rem">
-        <button class="btn btn--sm" onclick="document.getElementById('import-form').toggleAttribute('hidden')">
-          Import Channel (.zip)
-        </button>
-      </div>
-      <div id="import-form" hidden style="margin-bottom:1.5rem">
-        <div class="card">
-          <h3 style="margin-bottom:0.5rem">Import Channel from .zip</h3>
-          <form action="/channels/import" method="post" enctype="multipart/form-data"
-                style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
-            <input type="file" name="file" accept=".zip" required>
-            <label style="display:flex;align-items:center;gap:0.5rem">
-              <input type="checkbox" name="overwrite" value="true">
-              <span class="meta">Overwrite if channel already exists</span>
-            </label>
-            <div style="display:flex;gap:0.5rem">
-              <button type="submit" class="btn btn--sm">Import</button>
-              <button type="button" class="btn btn--sm" onclick="document.getElementById('import-form').toggleAttribute('hidden')">Cancel</button>
-            </div>
-          </form>
-        </div>
-      </div>`;
-
-    const channelOAuthSection = channelOAuthRows ? `
-      <h2 style="margin-top:2rem">Connections</h2>
-      ${channelOAuthRows}
-    ` : '';
-
-    return c.html(layout('Channels', `<h1>Channels</h1>${importForm}${renderChannels(channels)}${channelOAuthSection}`));
-  } catch {
-    return c.html(
-      layout('Channels', '<h1>Channels</h1><p class="badge badge--red">Agent unreachable</p>'),
-    );
-  }
-});
+app.get('/channels', (c) => c.redirect('/ext'));
 
 app.get('/channels/:name', async (c) => {
   const name = c.req.param('name');
@@ -498,7 +366,7 @@ app.get('/channels/:name', async (c) => {
     ]);
 
     if (!channel) {
-      return c.html(layout('Channel Not Found', '<h1>Channel Not Found</h1><p><a href="/channels">&larr; Back to Channels</a></p>'));
+      return c.html(layout('Channel Not Found', '<h1>Channel Not Found</h1><p><a href="/ext">&larr; Back to Extensions</a></p>'));
     }
     return c.html(layout(channel.metadata.name, renderChannelDetail(channel, pairing, pairingMessage)));
   } catch {
@@ -642,7 +510,7 @@ app.post('/channels/import', async (c) => {
   const overwrite = body.overwrite === 'true';
 
   if (!file || typeof file === 'string') {
-    return c.html(layout('Import Failed', '<h1>Import Failed</h1><p class="badge badge--red">No file uploaded</p><p><a href="/channels">&larr; Back to Channels</a></p>'));
+    return c.html(layout('Import Failed', '<h1>Import Failed</h1><p class="badge badge--red">No file uploaded</p><p><a href="/ext">&larr; Back to Extensions</a></p>'));
   }
 
   const formData = new FormData();
@@ -656,7 +524,7 @@ app.post('/channels/import', async (c) => {
 
   if (!res.ok) {
     const error = (await res.json()) as { error?: string };
-    return c.html(layout('Import Failed', `<h1>Import Failed</h1><p class="badge badge--red">${error.error}</p><p><a href="/channels">&larr; Back to Channels</a></p>`));
+    return c.html(layout('Import Failed', `<h1>Import Failed</h1><p class="badge badge--red">${error.error}</p><p><a href="/ext">&larr; Back to Extensions</a></p>`));
   }
 
   return c.redirect('/channels');
