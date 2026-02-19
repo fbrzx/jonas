@@ -53,13 +53,14 @@ function renderTaskRow(task: Task): string {
   const nextRun = task.nextRun ? new Date(task.nextRun).toLocaleString() : 'Not scheduled';
   const lastRun = task.lastRun ? new Date(task.lastRun).toLocaleString() : 'Never';
   const cronDesc = parseCronDescription(task.cron);
+  const effectiveStatus = !task.enabled && task.status === 'running' ? 'pending' : task.status;
 
   const statusBadge = {
     pending: '<span class="badge">⏳ Pending</span>',
     running: '<span class="badge badge--blue">▶️ Running</span>',
     completed: '<span class="badge badge--green">✓ Success</span>',
     failed: '<span class="badge badge--red">✗ Failed</span>',
-  }[task.status] || '<span class="badge">Unknown</span>';
+  }[effectiveStatus] || '<span class="badge">Unknown</span>';
 
   return `
     <tr id="task-${task.id}">

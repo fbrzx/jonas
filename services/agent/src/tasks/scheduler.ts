@@ -96,6 +96,14 @@ export class TaskScheduler {
       existingJob.stop();
       this.jobs.delete(id);
     }
+
+    if (changes.enabled === false) {
+      task.nextRun = undefined;
+      if (task.status === 'running') {
+        task.status = 'pending';
+      }
+    }
+
     if (task.enabled) {
       this.schedule(task);
     }
@@ -108,10 +116,15 @@ export class TaskScheduler {
   list(): ScheduledTask[] {
     // Update nextRun from live cron jobs
     for (const task of this.tasks) {
+      if (!task.enabled && task.status === 'running') {
+        task.status = 'pending';
+      }
       const job = this.jobs.get(task.id);
       if (job) {
         const next = job.nextRun();
         task.nextRun = next ? next.toISOString() : undefined;
+      } else {
+        task.nextRun = undefined;
       }
     }
     return this.tasks;
