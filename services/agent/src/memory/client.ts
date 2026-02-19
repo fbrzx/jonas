@@ -113,4 +113,35 @@ export class MemoryClient {
     const info = await this.client.getCollection(`memory_${category}`);
     return info.points_count ?? 0;
   }
+
+  async latest(limit = 5): Promise<Memory[]> {
+    const all: Memory[] = [];
+
+    for (const category of COLLECTIONS) {
+      const result = await this.client.scroll(`memory_${category}`, {
+        limit: Math.max(limit * 4, 20),
+        with_payload: true,
+        with_vector: false,
+      });
+
+      for (const point of result.points ?? []) {
+        const payload = point.payload as Record<string, unknown>;
+        const createdAt = String(payload.createdAt ?? '');
+        if (!createdAt) continue;
+
+        all.push({
+          id: String(point.id),
+          category,
+          content: String(payload.content ?? ''),
+          metadata: (payload.metadata as Record<string, unknown>) ?? {},
+          source: (payload.source as Memory['source']) ?? 'agent',
+          createdAt,
+          updatedAt: String(payload.updatedAt ?? createdAt),
+        });
+      }
+    }
+
+    all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return all.slice(0, limit);
+  }
 }

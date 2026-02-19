@@ -20,6 +20,14 @@ interface Task {
   lastResult?: string;
 }
 
+function escAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function parseCronDescription(cron: string): string {
   const patterns: Record<string, string> = {
     '0 8 * * *': 'Every day at 8:00 AM',
@@ -55,33 +63,33 @@ function renderTaskRow(task: Task): string {
 
   return `
     <tr id="task-${task.id}">
-      <td>
+      <td class="tasks-col--task">
         <strong>${task.name}</strong><br>
         <span class="meta">${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}</span>
       </td>
-      <td class="meta" style="font-size:0.8rem">
+      <td class="meta tasks-col--schedule" style="font-size:0.8rem">
         ${cronDesc}<br>
         <code style="font-size:0.7rem">${task.cron}</code>
       </td>
-      <td class="meta" style="font-size:0.75rem">
+      <td class="meta tasks-col--runs" style="font-size:0.75rem">
         <strong>Next:</strong> ${nextRun}<br>
         <strong>Last:</strong> ${lastRun}
       </td>
-      <td class="meta" style="font-size:0.75rem">${task.targetChannelType || 'dashboard'}</td>
-      <td style="white-space:nowrap">
+      <td class="meta tasks-col--target" style="font-size:0.75rem">${task.targetChannelType || 'dashboard'}</td>
+      <td class="tasks-col--status" style="white-space:nowrap">
         <span class="badge ${task.enabled ? 'badge--green' : 'badge--red'}">
           ${task.enabled ? '● Active' : '○ Paused'}
         </span>
         <div style="margin-top:0.25rem">${statusBadge}</div>
         ${task.lastResult ? `<button class="btn btn--sm" style="margin-top:0.25rem;font-size:0.65rem;padding:0.15rem 0.4rem" onclick="document.getElementById('result-${task.id}').toggleAttribute('hidden')">Last result</button>` : ''}
       </td>
-      <td style="white-space:nowrap">
+      <td class="tasks-col--actions" style="white-space:nowrap">
         <div style="display:flex;gap:0.25rem">
           <button class="btn btn--sm" onclick="toggleEditForm('edit-${task.id}')">Edit</button>
           <button class="btn btn--sm"
             hx-post="/tasks/${task.id}/run"
             hx-swap="none"
-            hx-on::after-request="alert(event.detail.xhr.responseText || 'Task queued for execution')">
+            hx-on::after-request="window.jonasAck(event.detail.xhr.responseText || 'Task queued for execution')">
             Run Now
           </button>
         </div>
@@ -104,7 +112,17 @@ function renderTaskRow(task: Task): string {
       <td colspan="6">
         <div class="card" style="margin:0.5rem 0">
           <h3 style="margin-bottom:0.5rem">Edit Task</h3>
-          <form hx-put="/tasks/${task.id}" hx-target="#task-${task.id}" hx-swap="outerHTML" style="display:flex;flex-direction:column;gap:0.75rem;max-width:600px">
+          <form id="form-edit-${task.id}"
+                data-original-name="${escAttr(task.name)}"
+                data-original-cron="${escAttr(task.cron)}"
+                data-original-prompt="${escAttr(task.prompt)}"
+                data-original-targetchanneltype="${escAttr(task.targetChannelType || 'dashboard')}"
+                hx-put="/tasks/${task.id}"
+                hx-target="#task-${task.id}"
+                hx-swap="outerHTML"
+                onsubmit="markTaskFormDirty(this)"
+                hx-on::after-request="handleTaskEditDone('edit-${task.id}', this, event)"
+                style="display:flex;flex-direction:column;gap:0.75rem;max-width:600px">
             <div>
               <label class="meta" style="display:block;margin-bottom:0.25rem">Task Name</label>
               <input type="text" name="name" value="${task.name}" required style="width:100%;max-width:none">
@@ -129,7 +147,7 @@ function renderTaskRow(task: Task): string {
             </div>
             <div style="display:flex;gap:0.5rem">
               <button type="submit" class="btn btn--sm">Save Changes</button>
-              <button type="button" class="btn btn--sm" onclick="toggleEditForm('edit-${task.id}')">Cancel</button>
+              <button type="button" class="btn btn--sm" onclick="cancelTaskEdit('edit-${task.id}', document.getElementById('form-edit-${task.id}'))">Cancel</button>
             </div>
           </form>
         </div>
@@ -154,12 +172,25 @@ function renderTasksList(tasks: Task[]): string {
     return '<p class="meta">No scheduled tasks. Create one to get started.</p>';
   }
   return `
-    <table>
-      <thead>
-        <tr><th>Task</th><th>Schedule</th><th>Runs</th><th>Target</th><th>Status</th><th>Actions</th></tr>
-      </thead>
-      <tbody>${tasks.map(renderTaskRow).join('')}</tbody>
-    </table>`;
+    <style>
+      .tasks-table .tasks-col--task { min-width: 220px; }
+      .tasks-table .tasks-col--schedule { min-width: 180px; }
+      .tasks-table .tasks-col--runs { min-width: 190px; }
+      .tasks-table .tasks-col--target { min-width: 120px; }
+      .tasks-table .tasks-col--status { min-width: 150px; }
+      .tasks-table .tasks-col--actions { min-width: 180px; }
+      @media (max-width: 900px) {
+        .tasks-table .tasks-col--task { min-width: 260px; }
+      }
+    </style>
+    <div class="table-scroll">
+      <table class="tasks-table">
+        <thead>
+          <tr><th>Task</th><th>Schedule</th><th>Runs</th><th>Target</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody>${tasks.map(renderTaskRow).join('')}</tbody>
+      </table>
+    </div>`;
 }
 
 export default app;
@@ -177,7 +208,7 @@ app.get('/tasks', async (c) => {
           <form hx-post="/tasks/create"
                 hx-target="#tasks-list"
                 hx-swap="innerHTML"
-                hx-on::after-request="document.getElementById('create-task-form').setAttribute('hidden', ''); htmx.trigger('#tasks-list', 'reload')"
+                hx-on::after-request="document.getElementById('create-task-form').setAttribute('hidden', ''); window.jonasAck('Task created')"
                 style="display:flex;flex-direction:column;gap:0.75rem;max-width:600px">
             <div>
               <label class="meta" style="display:block;margin-bottom:0.25rem">Task Name</label>
@@ -219,6 +250,43 @@ app.get('/tasks', async (c) => {
             } else {
               el.setAttribute('hidden', '');
             }
+          }
+        }
+
+        function taskFormHasChanges(form) {
+          if (!form) return false;
+          var originalName = form.dataset.originalName || '';
+          var originalCron = form.dataset.originalCron || '';
+          var originalPrompt = form.dataset.originalPrompt || '';
+          var originalTarget = form.dataset.originalTargetchanneltype || '';
+          var currentName = (form.querySelector('[name="name"]') || {}).value || '';
+          var currentCron = (form.querySelector('[name="cron"]') || {}).value || '';
+          var currentPrompt = (form.querySelector('[name="prompt"]') || {}).value || '';
+          var currentTarget = (form.querySelector('[name="targetChannelType"]') || {}).value || '';
+          return currentName !== originalName
+            || currentCron !== originalCron
+            || currentPrompt !== originalPrompt
+            || currentTarget !== originalTarget;
+        }
+
+        function markTaskFormDirty(form) {
+          form.dataset.changed = taskFormHasChanges(form) ? '1' : '0';
+        }
+
+        function handleTaskEditDone(editRowId, form, evt) {
+          var editRow = document.getElementById(editRowId);
+          if (editRow) editRow.setAttribute('hidden', '');
+          if (evt && evt.detail && evt.detail.successful && form && form.dataset.changed === '1') {
+            window.jonasAck('Task changes saved');
+          }
+        }
+
+        function cancelTaskEdit(editRowId, form) {
+          var changed = taskFormHasChanges(form);
+          var editRow = document.getElementById(editRowId);
+          if (editRow) editRow.setAttribute('hidden', '');
+          if (changed) {
+            window.jonasAck('Changes discarded');
           }
         }
 

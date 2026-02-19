@@ -7,6 +7,7 @@ const app = new Hono();
 const AGENT_URL = () => process.env.AGENT_API_URL ?? 'http://localhost:3001';
 const PAGE_SIZE = 7;
 type ExtensionType = 'skill' | 'channel';
+type ExtFilterType = 'all' | 'skill' | 'channel' | 'connection';
 
 type ConnectionsResponse = Connection[] | { skillConnections: Connection[]; connectionStatus: unknown[] };
 
@@ -25,6 +26,14 @@ interface PaginationResult<T> {
   page: number;
   totalPages: number;
   totalItems: number;
+}
+
+interface UnifiedExtensionRow {
+  type: ExtFilterType;
+  name: string;
+  details: string;
+  status: string;
+  actions: string;
 }
 
 function redirectToExt(status: 'success' | 'error', message: string): Response {
@@ -84,11 +93,39 @@ function renderImportForm(importStatus: string | null, importMessage: string | n
 
   return `
     <div class="card">
+      <style>
+        .ext-import-file {
+          width: 100%;
+          max-width: 420px;
+          background: #0d1117;
+          border: 1px solid #30363d;
+          border-radius: 8px;
+          color: #c9d1d9;
+          padding: 0.35rem;
+          font-family: inherit;
+          font-size: 0.875rem;
+        }
+        .ext-import-file::file-selector-button {
+          border: none;
+          border-radius: 6px;
+          background: #1f6feb;
+          color: #fff;
+          font-family: inherit;
+          font-size: 0.82rem;
+          font-weight: 600;
+          padding: 0.42rem 0.72rem;
+          margin-right: 0.55rem;
+          cursor: pointer;
+        }
+        .ext-import-file::file-selector-button:hover {
+          background: #388bfd;
+        }
+      </style>
       <h2>Import Extension</h2>
       <p class="meta" style="margin-bottom:0.75rem">Upload one .zip package containing either a skill or a channel.</p>
       ${messageHtml}
       <form action="/ext/import" method="post" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
-        <input type="file" name="file" accept=".zip" required>
+        <input class="ext-import-file" type="file" name="file" accept=".zip" required>
         <label style="display:flex;align-items:center;gap:0.5rem">
           <input type="checkbox" name="overwrite" value="true">
           <span class="meta">Overwrite if extension already exists</span>
@@ -153,109 +190,72 @@ function renderPager(
     </div>`;
 }
 
-function renderSkillRow(skill: Skill): string {
-  const id = encodeURIComponent(skill.dirName);
+function parseExtFilter(value: string | null): ExtFilterType {
+  if (value === 'skill' || value === 'channel' || value === 'connection') return value;
+  return 'all';
+}
+
+function renderTypeFilter(current: ExtFilterType, params: URLSearchParams): string {
+  const options: ExtFilterType[] = ['all', 'skill', 'channel', 'connection'];
+  const labels: Record<ExtFilterType, string> = {
+    all: 'All',
+    skill: 'Skills',
+    channel: 'Channels',
+    connection: 'Connections',
+  };
+
+  const links = options.map((option) => {
+    const next = new URLSearchParams(params);
+    next.set('extType', option);
+    next.set('page', '1');
+    const cls = option === current ? 'btn btn--sm btn--primary' : 'btn btn--sm';
+    return `<a class="${cls}" href="/ext?${next.toString()}" style="text-decoration:none">${labels[option]}</a>`;
+  }).join('');
+
   return `
-    <tr>
-      <td><a href="/skills/${id}"><strong>${skill.metadata.name}</strong></a><br><span class="meta">${skill.metadata.description}</span></td>
-      <td><span class="badge badge--blue">skill</span></td>
-      <td>
-        ${skill.hasPrompt ? '<span class="badge badge--blue">prompt</span> ' : ''}
-        ${skill.hasTools ? '<span class="badge badge--blue">tools</span>' : ''}
-      </td>
-      <td><span class="badge ${skill.status === 'enabled' ? 'badge--green' : 'badge--red'}">${skill.status}</span></td>
-      <td class="actions-col">
-        <div class="table-actions">
-          <button
-            class="btn btn--sm"
-            hx-post="/skills/${id}/${skill.status === 'enabled' ? 'disable' : 'enable'}"
-            hx-target="closest tr"
-            hx-swap="outerHTML"
-          >${skill.status === 'enabled' ? 'Disable' : 'Enable'}</button>
-          <a class="btn btn--sm" href="/ext/export/skill/${id}">Export</a>
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 0.75rem;align-items:start">
+        <span class="meta" style="padding-top:0.3rem">Type:</span>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+          ${links}
         </div>
-      </td>
-    </tr>`;
+      </div>
+    </div>`;
 }
 
-function renderSkillsTable(skills: Skill[]): string {
-  if (skills.length === 0) {
-    return '<p class="meta">No skills found.</p>';
+function renderUnifiedExtensionsTable(rows: UnifiedExtensionRow[]): string {
+  if (rows.length === 0) {
+    return '<p class="meta">No matching extensions found.</p>';
   }
 
   return `
-    <table>
-      <thead><tr><th>Skill</th><th>Type</th><th>Capabilities</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>${skills.map((skill) => renderSkillRow(skill)).join('')}</tbody>
-    </table>`;
-}
-
-function renderChannelRow(channel: PlatformChannel): string {
-  const id = encodeURIComponent(channel.dirName);
-  return `
-    <tr>
-      <td>
-        <a href="/channels/${id}"><strong>${channel.metadata.name}</strong></a><br>
-        <span class="meta">${channel.metadata.description || 'No description'}</span>
-      </td>
-      <td><span class="badge badge--blue">channel</span></td>
-      <td><code>${channel.metadata.platform}</code></td>
-      <td>${channel.metadata.mode ? `<span class="badge badge--blue">${channel.metadata.mode}</span>` : '-'}</td>
-      <td><span class="badge ${channel.status === 'enabled' ? 'badge--green' : 'badge--red'}">${channel.status}</span></td>
-      <td><span class="badge ${channel.state === 'running' ? 'badge--green' : channel.state === 'error' ? 'badge--red' : ''}">${channel.state}</span></td>
-      <td class="actions-col">
-        <div class="table-actions">
-          <button
-            class="btn btn--sm"
-            hx-post="/channels/${id}/${channel.status === 'enabled' ? 'disable' : 'enable'}"
-            hx-target="closest tr"
-            hx-swap="outerHTML"
-          >${channel.status === 'enabled' ? 'Disable' : 'Enable'}</button>
-          <a class="btn btn--sm" href="/ext/export/channel/${id}">Export</a>
-        </div>
-      </td>
-    </tr>`;
-}
-
-function renderChannelsTable(channels: PlatformChannel[]): string {
-  if (channels.length === 0) {
-    return '<p class="meta">No channels found.</p>';
-  }
-
-  return `
-    <table>
-      <thead><tr><th>Channel</th><th>Type</th><th>Platform</th><th>Mode</th><th>Status</th><th>State</th><th>Actions</th></tr></thead>
-      <tbody>${channels.map((channel) => renderChannelRow(channel)).join('')}</tbody>
-    </table>`;
-}
-
-function renderConnectionsTable(connections: ExtensionConnection[]): string {
-  if (connections.length === 0) {
-    return '<p class="meta">No connections found.</p>';
-  }
-
-  const rows = connections
-    .map((conn) => {
-      const targetHref = conn.entityType === 'skill'
-        ? `/skills/${encodeURIComponent(conn.entityId)}`
-        : `/channels/${encodeURIComponent(conn.entityId)}`;
-
-      return `
-        <tr>
-          <td><a href="${targetHref}">${conn.entityName}</a></td>
-          <td><span class="badge badge--blue">${conn.entityType}</span></td>
-          <td><code>${conn.provider}</code></td>
-          <td><span class="badge ${conn.connected ? 'badge--green' : 'badge--red'}">${conn.connected ? 'connected' : 'not connected'}</span></td>
-          <td class="actions-col"><div class="table-actions"><a class="btn btn--sm" href="${targetHref}">Manage</a><a class="btn btn--sm" href="/ext/export/${encodeURIComponent(conn.entityType)}/${encodeURIComponent(conn.entityId)}">Export</a></div></td>
-        </tr>`;
-    })
-    .join('');
-
-  return `
-    <table>
-      <thead><tr><th>Extension</th><th>Type</th><th>Provider</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+    <style>
+      .ext-table .ext-col--name { min-width: 220px; }
+      .ext-table .ext-col--type { min-width: 130px; white-space: nowrap; }
+      .ext-table .ext-col--details { min-width: 280px; }
+      .ext-table .ext-col--status { min-width: 170px; white-space: nowrap; }
+      .ext-table .ext-col--actions { min-width: 180px; white-space: nowrap; }
+      @media (max-width: 900px) {
+        .ext-table .ext-col--name { min-width: 250px; }
+        .ext-table .ext-col--details { min-width: 320px; }
+      }
+    </style>
+    <div class="table-scroll">
+      <table class="ext-table">
+        <thead><tr><th>Name</th><th>Extension Type</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${rows.map((row) => `
+            <tr>
+              <td class="ext-col--name">${row.name}</td>
+              <td class="ext-col--type"><span class="badge badge--blue">${row.type}</span></td>
+              <td class="ext-col--details">${row.details}</td>
+              <td class="ext-col--status">${row.status}</td>
+              <td class="ext-col--actions actions-col"><div class="table-actions">${row.actions}</div></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 function collectChannelConnections(channels: PlatformChannel[]): ExtensionConnection[] {
@@ -317,30 +317,83 @@ app.get('/ext', async (c) => {
     searchParams.delete('importMessage');
     const importStatus = url.searchParams.get('importStatus');
     const importMessage = url.searchParams.get('importMessage');
+    const extType = parseExtFilter(url.searchParams.get('extType'));
 
-    const pagedSkills = paginate(skills, parsePage(url.searchParams.get('skillsPage')));
-    const pagedChannels = paginate(channels, parsePage(url.searchParams.get('channelsPage')));
-    const pagedConnections = paginate(allConnections, parsePage(url.searchParams.get('connectionsPage')));
+    const skillRows: UnifiedExtensionRow[] = skills.map((skill) => {
+      const id = encodeURIComponent(skill.dirName);
+      const details = `${skill.metadata.description}<br><span class="meta">${skill.hasPrompt ? 'prompt ' : ''}${skill.hasTools ? 'tools' : ''}</span>`;
+      const status = `<span class="badge ${skill.status === 'enabled' ? 'badge--green' : 'badge--red'}">${skill.status}</span>`;
+      const actions = `
+        <button class="btn btn--sm"
+          hx-post="/skills/${id}/${skill.status === 'enabled' ? 'disable' : 'enable'}"
+          hx-swap="none"
+          hx-on::after-request="location.reload()"
+        >${skill.status === 'enabled' ? 'Disable' : 'Enable'}</button>
+        <a class="btn btn--sm" href="/skills/${id}">Manage</a>
+        <a class="btn btn--sm" href="/ext/export/skill/${id}">Export</a>`;
+
+      return {
+        type: 'skill',
+        name: `<a href="/skills/${id}"><strong>${skill.metadata.name}</strong></a>`,
+        details,
+        status,
+        actions,
+      };
+    });
+
+    const channelRows: UnifiedExtensionRow[] = channels.map((channel) => {
+      const id = encodeURIComponent(channel.dirName);
+      const details = `<code>${channel.metadata.platform}</code>${channel.metadata.mode ? ` <span class="badge badge--blue">${channel.metadata.mode}</span>` : ''}`;
+      const status = `
+        <span class="badge ${channel.status === 'enabled' ? 'badge--green' : 'badge--red'}">${channel.status}</span>
+        <span class="badge ${channel.state === 'running' ? 'badge--green' : channel.state === 'error' ? 'badge--red' : ''}">${channel.state}</span>`;
+      const actions = `
+        <button class="btn btn--sm"
+          hx-post="/channels/${id}/${channel.status === 'enabled' ? 'disable' : 'enable'}"
+          hx-swap="none"
+          hx-on::after-request="location.reload()"
+        >${channel.status === 'enabled' ? 'Disable' : 'Enable'}</button>
+        <a class="btn btn--sm" href="/channels/${id}">Manage</a>
+        <a class="btn btn--sm" href="/ext/export/channel/${id}">Export</a>`;
+
+      return {
+        type: 'channel',
+        name: `<a href="/channels/${id}"><strong>${channel.metadata.name}</strong></a><br><span class="meta">${channel.metadata.description || ''}</span>`,
+        details,
+        status,
+        actions,
+      };
+    });
+
+    const connectionRows: UnifiedExtensionRow[] = allConnections.map((conn) => {
+      const targetHref = conn.entityType === 'skill'
+        ? `/skills/${encodeURIComponent(conn.entityId)}`
+        : `/channels/${encodeURIComponent(conn.entityId)}`;
+      const details = `<code>${conn.provider}</code><br><span class="meta">${conn.entityType}: ${conn.entityName}</span>`;
+      const status = `<span class="badge ${conn.connected ? 'badge--green' : 'badge--red'}">${conn.connected ? 'connected' : 'not connected'}</span>`;
+      const actions = `<a class="btn btn--sm" href="${targetHref}">Manage</a><a class="btn btn--sm" href="/ext/export/${encodeURIComponent(conn.entityType)}/${encodeURIComponent(conn.entityId)}">Export</a>`;
+      return {
+        type: 'connection',
+        name: `<a href="${targetHref}"><strong>${conn.entityName}</strong></a>`,
+        details,
+        status,
+        actions,
+      };
+    });
+
+    const unifiedRows = [...skillRows, ...channelRows, ...connectionRows];
+    const filteredRows = extType === 'all' ? unifiedRows : unifiedRows.filter((row) => row.type === extType);
+    const pagedRows = paginate(filteredRows, parsePage(url.searchParams.get('page')));
 
     return c.html(layout('Extensions', `
       <h1>Extensions</h1>
 
-      <div class="card">
-        <h2>Skills</h2>
-        ${renderSkillsTable(pagedSkills.items)}
-        ${renderPager(searchParams, 'skillsPage', pagedSkills.page, pagedSkills.totalPages, pagedSkills.totalItems)}
-      </div>
+      ${renderTypeFilter(extType, searchParams)}
 
       <div class="card">
-        <h2>Channels</h2>
-        ${renderChannelsTable(pagedChannels.items)}
-        ${renderPager(searchParams, 'channelsPage', pagedChannels.page, pagedChannels.totalPages, pagedChannels.totalItems)}
-      </div>
-
-      <div class="card">
-        <h2>Connections</h2>
-        ${renderConnectionsTable(pagedConnections.items)}
-        ${renderPager(searchParams, 'connectionsPage', pagedConnections.page, pagedConnections.totalPages, pagedConnections.totalItems)}
+        <h2>Extensions</h2>
+        ${renderUnifiedExtensionsTable(pagedRows.items)}
+        ${renderPager(searchParams, 'page', pagedRows.page, pagedRows.totalPages, pagedRows.totalItems)}
       </div>
 
       ${renderImportForm(importStatus, importMessage)}

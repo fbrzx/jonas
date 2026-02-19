@@ -44,20 +44,29 @@ function renderConnections(connections: Connection[]): string {
 
       return `
         <tr>
-          <td><a href="${skillUrl}"><strong>${conn.skillName}</strong></a></td>
-          <td><code>${conn.secretKey}</code></td>
-          <td>${conn.provider}</td>
-          <td><span class="badge ${conn.connected ? 'badge--green' : 'badge--red'}">${conn.connected ? 'connected' : 'not connected'}</span></td>
-          <td>${actionHtml}</td>
+          <td class="connections-col--skill"><a href="${skillUrl}"><strong>${conn.skillName}</strong></a></td>
+          <td class="connections-col--key"><code>${conn.secretKey}</code></td>
+          <td class="connections-col--provider">${conn.provider}</td>
+          <td class="connections-col--status"><span class="badge ${conn.connected ? 'badge--green' : 'badge--red'}">${conn.connected ? 'connected' : 'not connected'}</span></td>
+          <td class="connections-col--action">${actionHtml}</td>
         </tr>`;
     })
     .join('');
 
   return `
-    <table>
-      <thead><tr><th>Skill</th><th>Key</th><th>Provider</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+    <style>
+      .connections-table .connections-col--skill { min-width: 180px; }
+      .connections-table .connections-col--key { min-width: 180px; }
+      .connections-table .connections-col--provider { min-width: 110px; }
+      .connections-table .connections-col--status { min-width: 120px; white-space: nowrap; }
+      .connections-table .connections-col--action { min-width: 170px; white-space: nowrap; }
+    </style>
+    <div class="table-scroll">
+      <table class="connections-table">
+        <thead><tr><th>Skill</th><th>Key</th><th>Provider</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 // --- Redirect /vault → /connections ---

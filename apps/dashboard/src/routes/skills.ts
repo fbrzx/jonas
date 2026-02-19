@@ -104,10 +104,12 @@ function renderConfigSection(skill: Skill): string {
     .join('');
 
   html += `
-    <table>
-      <thead><tr><th>Key</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${configRows}</tbody>
-    </table>`;
+    <div class="table-scroll">
+      <table style="min-width:520px">
+        <thead><tr><th>Key</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>${configRows}</tbody>
+      </table>
+    </div>`;
 
   const unsetKeys = configKeys.filter((k) => !userKeys.includes(k));
   const options = unsetKeys.map((k) => `<option value="${k}">${k}</option>`).join('');
@@ -245,16 +247,17 @@ function renderRequirements(skill: Skill, allChannels: PlatformChannel[]): strin
   return `
     <h2 style="margin-top:2rem">Requirements</h2>
     <div class="card" id="requirements-section">
-      <table>
-        <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="table-scroll">
+        <table style="min-width:620px">
+          <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
     </div>`;
 }
 
 function renderSkillDetail(skill: Skill, channels: PlatformChannel[]): string {
   const id = encodeURIComponent(skill.dirName);
-  const configJson = skill.config ? JSON.stringify(skill.config, null, 2) : '{}';
 
   return `
     <p><a href="/ext">&larr; Back to Extensions</a></p>
@@ -278,10 +281,6 @@ function renderSkillDetail(skill: Skill, channels: PlatformChannel[]): string {
           hx-on::after-request="location.reload()"
         >${skill.status === 'enabled' ? 'Disable' : 'Enable'}</button>
 
-        <button class="btn btn--sm"
-          onclick="document.getElementById('config-editor').toggleAttribute('hidden')"
-        >Edit Config</button>
-
         <a href="/skills/${id}/export"
            download="${skill.dirName}.zip"
            class="btn btn--sm">Export (.zip)</a>
@@ -293,20 +292,6 @@ function renderSkillDetail(skill: Skill, channels: PlatformChannel[]): string {
           hx-swap="none"
           hx-on::after-request="window.location.href='/skills'"
         >Delete Skill</button>
-      </div>
-
-      <div id="config-editor" hidden style="margin-top:1rem">
-        <h3 style="margin-bottom:0.5rem">Edit config.json</h3>
-        <form hx-put="/skills/${id}/config"
-              hx-target="#config-editor"
-              hx-swap="outerHTML"
-              style="display:flex;flex-direction:column;gap:0.5rem">
-          <textarea name="config" rows="15" style="font-family:monospace;font-size:0.9em" required>${configJson}</textarea>
-          <div style="display:flex;gap:0.5rem">
-            <button type="submit" class="btn btn--sm">Save Config</button>
-            <button type="button" class="btn btn--sm" onclick="this.closest('#config-editor').toggleAttribute('hidden')">Cancel</button>
-          </div>
-        </form>
       </div>
     </div>
 

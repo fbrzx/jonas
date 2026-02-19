@@ -5,6 +5,18 @@ const app = new Hono();
 
 const AGENT_URL = () => process.env.AGENT_API_URL ?? 'http://localhost:3001';
 
+function describeConversationSource(channelType?: string, channelId?: string): string {
+  if (!channelType || channelType === 'dashboard') return 'Dashboard UI';
+  if (channelType === 'gateway') return `Gateway bridge${channelId ? ` (${channelId})` : ''}`;
+  return `Channel: ${channelType}${channelId ? ` (${channelId})` : ''}`;
+}
+
+function safeExcerpt(text: string, max = 140): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max)}...`;
+}
+
 app.get('/chat', (c) => {
   const content = `
     <div class="chat-container">
@@ -391,25 +403,50 @@ app.get('/chat/history', async (c) => {
     const res = await fetch(`${AGENT_URL()}/api/conversations/history?limit=${limit}&offset=${offset}`);
     const conversations = (await res.json()) as Array<{
       id: string;
-      lastMessage?: string;
-      lastActivity: string;
-      messageCount: number;
+      updatedAt?: string;
+      createdAt?: string;
       channelType?: string;
+      channelId?: string;
     }>;
 
-    const rows = conversations
-      .map((conv) => {
-        const preview = conv.lastMessage ? conv.lastMessage.substring(0, 80) : 'New conversation';
-        const time = conv.lastActivity ? new Date(conv.lastActivity).toLocaleString() : 'No activity';
+    const enriched = await Promise.all(
+      conversations.map(async (conv) => {
+        try {
+          const detailRes = await fetch(`${AGENT_URL()}/api/conversations/history/${encodeURIComponent(conv.id)}`);
+          if (!detailRes.ok) {
+            return { conv, messageCount: 0, excerpt: 'No messages yet' };
+          }
+          const detail = (await detailRes.json()) as {
+            messages: Array<{ role: string; content: string; timestamp: string }>;
+          };
+          const messages = detail.messages ?? [];
+          const lastMessage = [...messages].reverse().find((m) => m.role === 'user' || m.role === 'assistant');
+          return {
+            conv,
+            messageCount: messages.length,
+            excerpt: lastMessage ? safeExcerpt(lastMessage.content) : 'No messages yet',
+          };
+        } catch {
+          return { conv, messageCount: 0, excerpt: 'No messages yet' };
+        }
+      }),
+    );
+
+    const rows = enriched
+      .map(({ conv, excerpt, messageCount }) => {
+        const activity = conv.updatedAt || conv.createdAt;
+        const time = activity ? new Date(activity).toLocaleString() : 'No activity';
+        const source = describeConversationSource(conv.channelType, conv.channelId);
         return `
           <tr style="cursor:pointer" onclick="window.location.href='/chat/history/${encodeURIComponent(conv.id)}'">
-            <td>
+            <td class="history-col--date">
               <strong>${time}</strong><br>
-              <span class="meta">${preview}${conv.lastMessage && preview.length < conv.lastMessage.length ? '...' : ''}</span>
+              <span class="meta">${source}</span>
             </td>
-            <td class="meta">${conv.messageCount} messages</td>
-            <td><span class="badge badge--blue">${conv.channelType || 'dashboard'}</span></td>
-            <td><a href="/chat/history/${encodeURIComponent(conv.id)}" class="btn btn--sm">View</a></td>
+            <td class="meta history-col--excerpt">${excerpt}</td>
+            <td class="meta history-col--messages">${messageCount} messages</td>
+            <td class="history-col--type"><span class="badge badge--blue">${conv.channelType || 'dashboard'}</span></td>
+            <td class="history-col--actions"><a href="/chat/history/${encodeURIComponent(conv.id)}" class="btn btn--sm">View</a></td>
           </tr>`;
       })
       .join('');
@@ -429,11 +466,23 @@ app.get('/chat/history', async (c) => {
       <p><a href="/chat">&larr; Back to Chat</a></p>
       <h1>Chat History</h1>
       <div class="card">
-        ${conversations.length > 0 ? `
-          <table>
-            <thead><tr><th>Conversation</th><th>Messages</th><th>Channel</th><th>Action</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
+        <style>
+          .history-table .history-col--date { min-width: 180px; }
+          .history-table .history-col--excerpt { min-width: 260px; }
+          .history-table .history-col--messages,
+          .history-table .history-col--type,
+          .history-table .history-col--actions { white-space: nowrap; }
+          @media (max-width: 900px) {
+            .history-table .history-col--excerpt { min-width: 320px; }
+          }
+        </style>
+        ${enriched.length > 0 ? `
+          <div class="table-scroll">
+            <table class="history-table">
+              <thead><tr><th>Date / Source</th><th>Excerpt</th><th>Messages</th><th>Type</th><th>Action</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
           ${pagination}
         ` : '<p class="meta">No conversations yet.</p>'}
       </div>`;

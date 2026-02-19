@@ -96,10 +96,12 @@ function renderConfigSection(channel: PlatformChannel): string {
     .join('');
 
   let html = `
-    <table>
-      <thead><tr><th>Key</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${configRows}</tbody>
-    </table>`;
+    <div class="table-scroll">
+      <table style="min-width:540px">
+        <thead><tr><th>Key</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>${configRows}</tbody>
+      </table>
+    </div>`;
 
   const unsetKeys = allConfigKeys.filter((k) => !allKeys.includes(k));
   const options = unsetKeys.map((k) => `<option value="${k}">${k}</option>`).join('');
@@ -240,15 +242,16 @@ function renderChannelRequirements(channel: PlatformChannel): string {
   }
 
   return `
-    <table>
-      <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+    <div class="table-scroll">
+      <table style="min-width:620px">
+        <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | null, pairingMessage?: string): string {
   const id = encodeURIComponent(channel.dirName);
-  const configJson = channel.config ? JSON.stringify(channel.config, null, 2) : '{}';
   const requirementsHtml = renderChannelRequirements(channel);
   const requirementsSection = requirementsHtml ? `
     <h2 style="margin-top:2rem">Requirements</h2>
@@ -327,27 +330,6 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
     <div class="card" style="margin-top:1.5rem">
       <h2>Pairing</h2>
       ${renderPairingSection(channel, pairing, pairingMessage)}
-    </div>
-
-    <div style="margin-top:1.5rem">
-      <button class="btn btn--sm" onclick="document.getElementById('config-editor').toggleAttribute('hidden')">
-        Edit config.json
-      </button>
-    </div>
-    <div id="config-editor" hidden style="margin-top:1rem">
-      <div class="card">
-        <h3 style="margin-bottom:0.5rem">Edit config.json</h3>
-        <form hx-put="/channels/${id}/config"
-              hx-target="#config-editor-result"
-              style="display:flex;flex-direction:column;gap:0.5rem">
-          <textarea name="config" rows="12" style="font-family:monospace;font-size:0.9em" required>${configJson}</textarea>
-          <div style="display:flex;gap:0.5rem">
-            <button type="submit" class="btn btn--sm">Save</button>
-            <button type="button" class="btn btn--sm" onclick="document.getElementById('config-editor').toggleAttribute('hidden')">Cancel</button>
-          </div>
-        </form>
-        <div id="config-editor-result"></div>
-      </div>
     </div>
   `;
 }

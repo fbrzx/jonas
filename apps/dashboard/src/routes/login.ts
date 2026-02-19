@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { createHash } from 'node:crypto';
 
 const app = new Hono();
+const jonasIconUrl = process.env.DASHBOARD_ICON_URL || '/assets/avatar.png';
 
 function authCookieValue(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -17,6 +18,9 @@ function renderLoginPage(error = ''): string {
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; }
     .wrap { max-width: 420px; margin: 10vh auto; padding: 1.25rem; background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
+    .brand { display:flex; align-items:center; gap:0.65rem; margin-bottom: 1rem; }
+    .brand img { width: 34px; height: 34px; border-radius: 8px; border: 1px solid #30363d; background: #0d1117; image-rendering: pixelated; }
+    .brand span { color: #58a6ff; font-size: 1.5rem; font-weight: 700; line-height: 1; }
     h1 { margin: 0 0 1rem; font-size: 1.1rem; color: #f0f6fc; }
     label { display:block; font-size: 0.85rem; margin-bottom: 0.4rem; }
     input { width: 100%; box-sizing: border-box; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 0.55rem 0.7rem; }
@@ -26,9 +30,13 @@ function renderLoginPage(error = ''): string {
 </head>
 <body>
   <main class="wrap">
+    <div class="brand">
+      <img src="${jonasIconUrl}" alt="Jonas avatar" />
+      <span>Jonas</span>
+    </div>
     <h1>Dashboard Access</h1>
     <form method="post" action="/login">
-      <label for="token">DASHBOARD TOKEN</label>
+      <label for="token">Token</label>
       <input id="token" name="token" type="password" autocomplete="current-password" required />
       <button type="submit">Sign in</button>
     </form>

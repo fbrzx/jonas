@@ -46,9 +46,9 @@ COPY --from=build /app/pnpm-workspace.yaml ./
 # Create data directories owned by jonas
 RUN mkdir -p /data/vault /data/skills && chown -R jonas:jonas /data
 
-# Install gosu + Python (for skill MCP tool servers)
+# Install runtime tools: gosu + Python + git (for skill MCP tool servers and git commands)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gosu python3 python3-pip python3-venv && \
+  apt-get install -y --no-install-recommends gosu python3 python3-pip python3-venv git && \
     rm -rf /var/lib/apt/lists/*
 RUN pip3 install --break-system-packages mcp
 

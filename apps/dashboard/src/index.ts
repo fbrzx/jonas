@@ -77,6 +77,28 @@ app.get('/assets/*', async (c) => {
   });
 });
 
+app.get('/manifest.webmanifest', (c) => {
+  const icon = process.env.DASHBOARD_ICON_URL || '/assets/avatar.png';
+  const manifest = {
+    name: 'Jonas Dashboard',
+    short_name: 'Jonas',
+    start_url: '/',
+    scope: '/',
+    display: 'standalone',
+    background_color: '#0d1117',
+    theme_color: '#161b22',
+    icons: [
+      { src: icon, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: icon, sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+    ],
+  };
+
+  return c.json(manifest, 200, {
+    'Content-Type': 'application/manifest+json; charset=utf-8',
+    'Cache-Control': 'public, max-age=300',
+  });
+});
+
 const agentOrigin = (() => {
   try {
     return new URL(AGENT_API_URL).origin;
@@ -143,7 +165,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 
 app.use('*', async (c, next) => {
   const path = c.req.path;
-  if (path === '/health' || path === '/login' || path.startsWith('/oauth/') || path.startsWith('/assets/')) {
+  if (path === '/health' || path === '/login' || path === '/manifest.webmanifest' || path.startsWith('/oauth/') || path.startsWith('/assets/')) {
     await next();
     return;
   }

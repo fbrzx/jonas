@@ -404,6 +404,12 @@ export function createApiServer(deps: ApiDeps) {
     });
   });
 
+  app.get('/api/memory/latest', async (c) => {
+    const limit = Number(c.req.query('limit') ?? 5);
+    const memories = await deps.memory.latest(limit);
+    return c.json({ count: memories.length, memories });
+  });
+
   // Conversations (in-memory)
   app.get('/api/conversations', (c) => {
     return c.json(deps.agent.getConversations());

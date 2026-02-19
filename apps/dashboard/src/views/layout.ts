@@ -30,16 +30,27 @@ export function layout(title: string, content: string): string {
   const nav = NAV_ITEMS.map(
     (item) => `<a href="${item.href}">${item.label}</a>`
   ).join('');
+  const mobileNav = NAV_ITEMS.map(
+    (item) => `<a href="${item.href}" class="mobile-nav__link">${item.label}</a>`
+  ).join('');
   
   const envClass = getEnvironmentClass(instanceInfo);
   const envLabel = instanceInfo ? `<span class="env-label ${envClass}">${instanceInfo}</span>` : '';
+  const menuLabel = instanceInfo || 'Menu';
+  const menuClass = `nav-menu-btn ${envClass}`;
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#161b22">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Jonas">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="${jonasIconUrl}">
+  <link rel="apple-touch-icon" href="${jonasIconUrl}">
   <title>${title} - Jonas on ${instanceInfo}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <style>
@@ -75,6 +86,45 @@ export function layout(title: string, content: string): string {
       image-rendering: pixelated;
     }
     .nav-links { display: flex; gap: 1.5rem; align-items: center; }
+    .nav-right { display: flex; align-items: center; gap: 0.75rem; }
+    .nav-menu-btn {
+      display: none;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      background: #0d1117;
+      color: #c9d1d9;
+      padding: 0.3rem 0.5rem;
+      font-family: inherit;
+      font-size: 0.75rem;
+      cursor: pointer;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .nav-menu-btn:hover { background: #1f2937; }
+    .nav-menu-btn__icon { font-size: 0.85rem; line-height: 1; opacity: 0.9; }
+    .nav-menu-btn--open .nav-menu-btn__icon { transform: scale(0.95); }
+    .mobile-nav {
+      display: none;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 0.5rem 1rem 0.75rem;
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: var(--mobile-nav-top, 56px);
+      z-index: 99;
+    }
+    .mobile-nav[hidden] { display: none !important; }
+    .mobile-nav--open { display: block; }
+    .mobile-nav__link {
+      display: block;
+      padding: 0.5rem 0.6rem;
+      border-radius: 6px;
+      text-decoration: none;
+      color: #58a6ff;
+      font-size: 0.88rem;
+    }
+    .mobile-nav__link:hover { background: #1f293744; }
     .env-label {
       display: inline-block; padding: 0.25rem 0.75rem;
       border-radius: 4px; font-size: 0.7rem; font-weight: 600;
@@ -177,7 +227,7 @@ export function layout(title: string, content: string): string {
     .chat-input-bar textarea {
       flex: 1; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
       padding: 0.5rem 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.875rem;
-      resize: none; min-height: 38px; max-height: 200px; line-height: 1.5;
+      resize: none; min-height: 56px; max-height: 240px; line-height: 1.5;
     }
     .chat-input-bar textarea:focus { outline: none; border-color: #58a6ff; }
     .chat-input-bar textarea:disabled { opacity: 0.5; }
@@ -229,6 +279,53 @@ export function layout(title: string, content: string): string {
       padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.85rem;
     }
     .info-box code { background: #1f293744; padding: 0.1em 0.3em; border-radius: 3px; }
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .table-scroll table { min-width: 680px; }
+    .table-scroll th { white-space: nowrap; }
+    .table-scroll td { overflow-wrap: break-word; }
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex; align-items: center; justify-content: center;
+      padding: 1rem;
+    }
+    .modal-overlay[hidden] { display: none; }
+    .modal-card {
+      width: min(520px, 100%);
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 1rem;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+    }
+    .modal-title { margin-bottom: 0.4rem; color: #f0f6fc; font-size: 1rem; }
+    .modal-body { margin-bottom: 0.9rem; color: #c9d1d9; white-space: pre-wrap; }
+    .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
+    code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+    @media (max-width: 900px) {
+      nav {
+        padding: 0.65rem 0.9rem;
+        gap: 0.75rem;
+      }
+      .nav-links { display: none; }
+      .env-label { display: none; }
+      .nav-menu-btn { display: inline-flex; }
+      table { font-size: 0.84rem; }
+      th { white-space: nowrap; }
+      td { white-space: normal; overflow-wrap: break-word; word-break: normal; }
+      .table-scroll { border-radius: 8px; }
+      .table-scroll table {
+        min-width: 700px;
+        box-shadow: inset 10px 0 8px -12px rgba(255, 255, 255, 0.25), inset -10px 0 8px -12px rgba(255, 255, 255, 0.25);
+      }
+      .table-scroll th { white-space: nowrap; }
+      .table-scroll td { white-space: normal; overflow-wrap: break-word; }
+      main { padding: 1rem; }
+    }
   </style>
 </head>
 <body>
@@ -240,10 +337,26 @@ export function layout(title: string, content: string): string {
       </a>
       <div class="nav-links">${nav}</div>
     </div>
-    ${envLabel}
+    <div class="nav-right">
+      ${envLabel}
+      <button id="nav-menu-btn" class="${menuClass}" type="button" aria-expanded="false" aria-controls="mobile-nav" aria-label="Open Jonas menu">
+        <span class="nav-menu-btn__label">${menuLabel}</span>
+        <span id="nav-menu-icon" class="nav-menu-btn__icon">☰</span>
+      </button>
+    </div>
   </nav>
+  <div id="mobile-nav" class="mobile-nav" hidden>
+    ${mobileNav}
+  </div>
   <main>${content}</main>
   <footer>Jonas Dashboard</footer>
+  <div id="jonas-modal" class="modal-overlay" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="jonas-modal-title">
+      <h3 id="jonas-modal-title" class="modal-title">Notice</h3>
+      <div id="jonas-modal-body" class="modal-body"></div>
+      <div id="jonas-modal-actions" class="modal-actions"></div>
+    </div>
+  </div>
   <script>
     (() => {
       const nav = document.getElementById('top-nav');
@@ -251,6 +364,100 @@ export function layout(title: string, content: string): string {
       const sync = () => nav.classList.toggle('nav--scrolled', window.scrollY > 4);
       sync();
       window.addEventListener('scroll', sync, { passive: true });
+
+      const menuBtn = document.getElementById('nav-menu-btn');
+      const menuIcon = document.getElementById('nav-menu-icon');
+      const mobileNav = document.getElementById('mobile-nav');
+      if (!menuBtn || !mobileNav || !menuIcon) return;
+
+      const syncMobileNavTop = () => {
+        document.documentElement.style.setProperty('--mobile-nav-top', String(nav.getBoundingClientRect().height) + 'px');
+      };
+      syncMobileNavTop();
+
+      const setOpen = (open) => {
+        menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        menuBtn.classList.toggle('nav-menu-btn--open', open);
+        menuIcon.textContent = open ? '✕' : '☰';
+        mobileNav.classList.toggle('mobile-nav--open', open);
+        if (open) mobileNav.removeAttribute('hidden');
+        else mobileNav.setAttribute('hidden', '');
+      };
+
+      menuBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const isOpen = menuBtn.getAttribute('aria-expanded') === 'true';
+        setOpen(!isOpen);
+      });
+
+      document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Node)) return;
+        if (mobileNav.contains(event.target) || menuBtn.contains(event.target)) return;
+        setOpen(false);
+      });
+
+      window.addEventListener('resize', () => {
+        syncMobileNavTop();
+        if (window.innerWidth > 900) setOpen(false);
+      });
+    })();
+
+    (() => {
+      const modal = document.getElementById('jonas-modal');
+      const titleEl = document.getElementById('jonas-modal-title');
+      const bodyEl = document.getElementById('jonas-modal-body');
+      const actionsEl = document.getElementById('jonas-modal-actions');
+      if (!modal || !titleEl || !bodyEl || !actionsEl) return;
+
+      const closeModal = () => {
+        modal.setAttribute('hidden', '');
+        actionsEl.innerHTML = '';
+      };
+
+      const createButton = (label, className, onClick) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = className;
+        btn.textContent = label;
+        btn.addEventListener('click', onClick);
+        return btn;
+      };
+
+      window.jonasAck = (message, title = 'Notice') => {
+        titleEl.textContent = title;
+        bodyEl.textContent = String(message ?? '');
+        actionsEl.innerHTML = '';
+        actionsEl.appendChild(createButton('OK', 'btn btn--sm', closeModal));
+        modal.removeAttribute('hidden');
+      };
+
+      window.jonasConfirm = (message, title = 'Please confirm') => new Promise((resolve) => {
+        titleEl.textContent = title;
+        bodyEl.textContent = String(message ?? '');
+        actionsEl.innerHTML = '';
+        actionsEl.appendChild(createButton('Cancel', 'btn btn--sm', () => { closeModal(); resolve(false); }));
+        actionsEl.appendChild(createButton('Confirm', 'btn btn--sm btn--danger', () => { closeModal(); resolve(true); }));
+        modal.removeAttribute('hidden');
+      });
+
+      window.alert = (message) => window.jonasAck(message);
+
+      document.body.addEventListener('htmx:confirm', (evt) => {
+        if (!evt.detail.question) return;
+        evt.preventDefault();
+        window.jonasConfirm(evt.detail.question).then((ok) => {
+          if (ok) evt.detail.issueRequest(true);
+        });
+      });
+    })();
+
+    (() => {
+      const shouldAutoRefresh = Array.from(document.querySelectorAll('.badge--red'))
+        .some((el) => /agent unreachable/i.test((el.textContent || '').trim()));
+      if (!shouldAutoRefresh) return;
+      window.setInterval(() => {
+        window.location.reload();
+      }, 30000);
     })();
   </script>
 </body>

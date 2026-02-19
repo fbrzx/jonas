@@ -30,27 +30,31 @@ function renderModelConfig(config: ModelConfig): string {
   const modelName = config.provider === 'ollama'
     ? (config.ollama?.model ?? 'not configured')
     : (config.claude?.model ?? 'not configured');
-  const baseUrl = config.provider === 'ollama' ? (config.ollama?.baseUrl ?? 'not configured') : 'n/a';
+  const baseUrlRow = config.provider === 'ollama'
+    ? `<tr>
+            <th>Ollama Base URL</th>
+            <td><code>${config.ollama?.baseUrl ?? 'not configured'}</code></td>
+          </tr>`
+    : '';
 
   return `
     <div class="card" style="margin-bottom:1.5rem">
       <h2>Model Configuration</h2>
-      <table>
-        <tbody>
-          <tr>
-            <th>Provider</th>
-            <td>${provider}</td>
-          </tr>
-          <tr>
-            <th>Model</th>
-            <td><code>${modelName}</code></td>
-          </tr>
-          <tr>
-            <th>Ollama Base URL</th>
-            <td><code>${baseUrl}</code></td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table style="min-width:520px">
+          <tbody>
+            <tr>
+              <th>Provider</th>
+              <td>${provider}</td>
+            </tr>
+            <tr>
+              <th>Model</th>
+              <td><code>${modelName}</code></td>
+            </tr>
+            ${baseUrlRow}
+          </tbody>
+        </table>
+      </div>
     </div>
   `;
 }
@@ -59,7 +63,7 @@ function renderStatus(data: StatusData, modelConfig?: ModelConfig): string {
   return `
     ${modelConfig ? renderModelConfig(modelConfig) : ''}
 
-    <div class="grid">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-bottom:1rem">
       <div class="card">
         <h2>Uptime</h2>
         <p>${formatUptime(data.uptime)}</p>
@@ -70,7 +74,7 @@ function renderStatus(data: StatusData, modelConfig?: ModelConfig): string {
       </div>
       
     </div>
-    <div class="grid">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem">
       <div class="card">
         <h2>Gateway</h2>
         <span class="badge ${data.channels.gateway ? 'badge--green' : 'badge--red'}">${data.channels.gateway ? 'connected' : 'offline'}</span>
