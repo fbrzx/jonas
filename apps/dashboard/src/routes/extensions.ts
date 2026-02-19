@@ -325,8 +325,6 @@ app.get('/ext', async (c) => {
     return c.html(layout('Extensions', `
       <h1>Extensions</h1>
 
-      ${renderImportForm(importStatus, importMessage)}
-
       <div class="card">
         <h2>Skills</h2>
         ${renderSkillsTable(pagedSkills.items)}
@@ -344,6 +342,9 @@ app.get('/ext', async (c) => {
         ${renderConnectionsTable(pagedConnections.items)}
         ${renderPager(searchParams, 'connectionsPage', pagedConnections.page, pagedConnections.totalPages, pagedConnections.totalItems)}
       </div>
+
+      ${renderImportForm(importStatus, importMessage)}
+
     `));
   } catch {
     return c.html(layout('Extensions', '<h1>Extensions</h1><p class="badge badge--red">Agent unreachable</p>'));
