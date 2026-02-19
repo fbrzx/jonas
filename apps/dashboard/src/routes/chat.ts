@@ -78,13 +78,28 @@ app.get('/chat', (c) => {
         return '<pre>' + escapeHtml(text) + '</pre>';
       }
 
+      function normalizeErrorMessage(message) {
+        var text = String(message || 'Unknown error').trim();
+        return text.replace(/^Error:\s*/i, '');
+      }
+
+      function isAssistantErrorMessage(message) {
+        return message
+          && message.role === 'assistant'
+          && (message.error === true || (typeof message.content === 'string' && /^Error:\s*/i.test(message.content)));
+      }
+
       function renderAllMessages() {
         messagesEl.innerHTML = messages.map(function(m) {
-          var cls = m.role === 'user' ? 'chat-msg chat-msg--user' : 'chat-msg chat-msg--assistant';
+          var isError = isAssistantErrorMessage(m);
+          var cls = m.role === 'user'
+            ? 'chat-msg chat-msg--user'
+            : ('chat-msg chat-msg--assistant' + (isError ? ' chat-msg--error' : ''));
           var label = m.role === 'user' ? 'You' : 'Jonas';
+          var assistantContent = isError ? normalizeErrorMessage(m.content) : m.content;
           var body = m.role === 'user'
             ? '<pre class="chat-msg__content">' + escapeHtml(m.content) + '</pre>'
-            : '<div class="chat-msg__content chat-md">' + renderMd(m.content) + '</div>';
+            : '<div class="chat-msg__content chat-md">' + renderMd(assistantContent) + '</div>';
           return '<div class="' + cls + '"><div class="chat-msg__label">' + label + '</div>' + body + '</div>';
         }).join('');
         scrollToBottom();
@@ -161,6 +176,7 @@ app.get('/chat', (c) => {
           var decoder = new TextDecoder();
           var buffer = '';
           var responseContent = '';
+          var responseIsError = false;
 
           while (true) {
             var result = await reader.read();
@@ -180,8 +196,10 @@ app.get('/chat', (c) => {
                   var data = JSON.parse(line.slice(6));
                   if (eventType === 'message') {
                     responseContent = data.content || '';
+                    responseIsError = false;
                   } else if (eventType === 'error') {
-                    responseContent = 'Error: ' + (data.error || 'Unknown error');
+                    responseContent = normalizeErrorMessage(data.error || 'Unknown error');
+                    responseIsError = true;
                   }
                 } catch(e) {}
                 eventType = '';
@@ -191,14 +209,18 @@ app.get('/chat', (c) => {
 
           removeThinkingIndicator();
           if (responseContent) {
-            messages.push({ role: 'assistant', content: responseContent });
+            messages.push({ role: 'assistant', content: responseContent, error: responseIsError });
             renderAllMessages();
             saveMessages();
           }
         } catch(err) {
           removeThinkingIndicator();
-          if (err.name !== 'AbortError') {
-            messages.push({ role: 'assistant', content: 'Error: ' + (err.message || 'could not reach agent') });
+          if (!err || err.name !== 'AbortError') {
+            messages.push({
+              role: 'assistant',
+              content: normalizeErrorMessage((err && err.message) || 'could not reach agent'),
+              error: true,
+            });
             renderAllMessages();
             saveMessages();
           }
