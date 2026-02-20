@@ -54,7 +54,7 @@ You can also configure the model provider via the dashboard UI at runtime. See `
 
 ```bash
 make install      # Install dependencies
-make rebuild      # Stop containers, build and deploy
+make rebuild      # Stop containers, build and restart containers
 
 pnpm dev          # Start development mode
 pnpm build        # Build all packages
