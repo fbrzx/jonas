@@ -9,7 +9,7 @@ export interface ModelProvider {
    * @param opts Query options including prompt, system prompt, and abort signal
    * @returns The model's response text
    */
-  query(opts: QueryOptions): Promise<string>;
+  query(opts: QueryOptions): Promise<QueryResult>;
 
   /**
    * Get the provider name for status reporting.
@@ -23,6 +23,32 @@ export interface QueryOptions {
   systemPrompt: string;
   model?: string;
   signal: AbortSignal;
+  messages?: ProviderMessage[];
+  tools?: ProviderTool[];
+}
+
+export interface QueryResult {
+  text: string;
+  toolCalls?: ProviderToolCall[];
+}
+
+export interface ProviderTool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export interface ProviderToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface ProviderMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  name?: string;
+  toolCalls?: ProviderToolCall[];
 }
 
 /**

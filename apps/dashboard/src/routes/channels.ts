@@ -260,7 +260,7 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
     </div>` : '';
 
   return `
-    <p><a href="/ext">&larr; Back to Extensions</a></p>
+    <p><a href="/ext">&larr; Back to Plugins</a></p>
     <h1>${channel.metadata.name}</h1>
     <p class="meta" style="margin-bottom:1.5rem">${channel.metadata.description}</p>
 
@@ -348,7 +348,7 @@ app.get('/channels/:name', async (c) => {
     ]);
 
     if (!channel) {
-      return c.html(layout('Channel Not Found', '<h1>Channel Not Found</h1><p><a href="/ext">&larr; Back to Extensions</a></p>'));
+      return c.html(layout('Channel Not Found', '<h1>Channel Not Found</h1><p><a href="/ext">&larr; Back to Plugins</a></p>'));
     }
     return c.html(layout(channel.metadata.name, renderChannelDetail(channel, pairing, pairingMessage)));
   } catch {
@@ -492,7 +492,7 @@ app.post('/channels/import', async (c) => {
   const overwrite = body.overwrite === 'true';
 
   if (!file || typeof file === 'string') {
-    return c.html(layout('Import Failed', '<h1>Import Failed</h1><p class="badge badge--red">No file uploaded</p><p><a href="/ext">&larr; Back to Extensions</a></p>'));
+    return c.html(layout('Import Failed', '<h1>Import Failed</h1><p class="badge badge--red">No file uploaded</p><p><a href="/ext">&larr; Back to Plugins</a></p>'));
   }
 
   const formData = new FormData();
@@ -506,7 +506,7 @@ app.post('/channels/import', async (c) => {
 
   if (!res.ok) {
     const error = (await res.json()) as { error?: string };
-    return c.html(layout('Import Failed', `<h1>Import Failed</h1><p class="badge badge--red">${error.error}</p><p><a href="/ext">&larr; Back to Extensions</a></p>`));
+    return c.html(layout('Import Failed', `<h1>Import Failed</h1><p class="badge badge--red">${error.error}</p><p><a href="/ext">&larr; Back to Plugins</a></p>`));
   }
 
   return c.redirect('/channels');

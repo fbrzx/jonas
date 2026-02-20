@@ -260,7 +260,7 @@ function renderSkillDetail(skill: Skill, channels: PlatformChannel[]): string {
   const id = encodeURIComponent(skill.dirName);
 
   return `
-    <p><a href="/ext">&larr; Back to Extensions</a></p>
+    <p><a href="/ext">&larr; Back to Plugins</a></p>
     <h1>${skill.metadata.name}</h1>
 
     <div class="card">
@@ -509,7 +509,7 @@ app.post('/skills/import', async (c) => {
           'Import Failed',
           `<h1>Import Failed</h1>
            <p class="badge badge--red">No file uploaded</p>
-           <p><a href="/ext">&larr; Back to Extensions</a></p>`,
+           <p><a href="/ext">&larr; Back to Plugins</a></p>`,
         ),
       );
     }
@@ -536,7 +536,7 @@ app.post('/skills/import', async (c) => {
           'Import Failed',
           `<h1>Import Failed</h1>
            <p class="badge badge--red">${error.error || 'Unknown error'}</p>
-           <p><a href="/ext">&larr; Back to Extensions</a></p>`,
+           <p><a href="/ext">&larr; Back to Plugins</a></p>`,
         ),
       );
     }
@@ -550,7 +550,7 @@ app.post('/skills/import', async (c) => {
         'Import Failed',
         `<h1>Import Failed</h1>
          <p class="badge badge--red">${message}</p>
-         <p><a href="/ext">&larr; Back to Extensions</a></p>`,
+         <p><a href="/ext">&larr; Back to Plugins</a></p>`,
       ),
     );
   }

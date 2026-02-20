@@ -4,7 +4,7 @@
 
 import { spawn } from 'node:child_process';
 import { createLogger } from '@jonas/shared/utils';
-import type { ModelProvider, QueryOptions } from './base.js';
+import type { ModelProvider, QueryOptions, QueryResult } from './base.js';
 
 const log = createLogger('provider-claude');
 
@@ -31,7 +31,7 @@ export class ClaudeProvider implements ModelProvider {
     return `claude:${this.model}`;
   }
 
-  query(opts: QueryOptions): Promise<string> {
+  query(opts: QueryOptions): Promise<QueryResult> {
     return new Promise((resolve, reject) => {
       const model = opts.model ?? this.model;
       const args = [
@@ -78,7 +78,7 @@ export class ClaudeProvider implements ModelProvider {
             return;
           }
           log.info({ duration: result.duration_ms }, 'Claude CLI response received');
-          resolve(result.result);
+          resolve({ text: result.result });
         } catch {
           if (code !== 0) {
             // Try to extract useful error info from stderr
@@ -86,7 +86,7 @@ export class ClaudeProvider implements ModelProvider {
             const trimmedError = errorDetail.substring(0, 500); // Limit error length
             reject(new Error(`Claude CLI exited with code ${code}: ${trimmedError}`));
           } else {
-            resolve(stdout.trim());
+            resolve({ text: stdout.trim() });
           }
         }
       });

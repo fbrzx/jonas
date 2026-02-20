@@ -150,7 +150,16 @@ async function main() {
   const database = new ConversationDatabase(dbPath);
 
   // Initialize agent core
-  const agent = new AgentCore({ retriever, extractor, provider, mcpConfigPath, skillRegistry, database });
+  const agent = new AgentCore({
+    retriever,
+    extractor,
+    memory,
+    embeddings,
+    provider,
+    mcpConfigPath,
+    skillRegistry,
+    database,
+  });
 
   // Initialize task scheduler
   const scheduler = new TaskScheduler({

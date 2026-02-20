@@ -5,6 +5,7 @@ const log = createLogger('embeddings');
 const VOYAGE_API_URL = 'https://api.voyageai.com/v1/embeddings';
 const MODEL = 'voyage-3-large';
 const DIMENSIONS = 1024;
+const REQUEST_TIMEOUT_MS = Number(process.env.VOYAGE_TIMEOUT_MS ?? 15000);
 
 export class EmbeddingClient {
   private apiKey: string;
@@ -21,17 +22,10 @@ export class EmbeddingClient {
       throw new Error('VOYAGE_API_KEY not configured');
     }
 
-    const response = await fetch(VOYAGE_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        input: texts,
-        input_type: 'document',
-      }),
+    const response = await this.fetchWithTimeout({
+      model: MODEL,
+      input: texts,
+      input_type: 'document',
     });
 
     if (!response.ok) {
@@ -51,17 +45,10 @@ export class EmbeddingClient {
       throw new Error('VOYAGE_API_KEY not configured');
     }
 
-    const response = await fetch(VOYAGE_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        input: [text],
-        input_type: 'query',
-      }),
+    const response = await this.fetchWithTimeout({
+      model: MODEL,
+      input: [text],
+      input_type: 'query',
     });
 
     if (!response.ok) {
@@ -78,5 +65,29 @@ export class EmbeddingClient {
 
   get dimensions(): number {
     return DIMENSIONS;
+  }
+
+  private async fetchWithTimeout(payload: Record<string, unknown>): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      return await fetch(VOYAGE_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } catch (err: unknown) {
+      if ((err as Error).name === 'AbortError') {
+        throw new Error(`Voyage API timeout after ${REQUEST_TIMEOUT_MS}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
