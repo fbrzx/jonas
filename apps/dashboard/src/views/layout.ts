@@ -1,7 +1,7 @@
 const NAV_ITEMS = [
   { href: '/chat', label: 'Chat' },
   { href: '/memory', label: 'Memory' },
-  { href: '/ext', label: 'Ext' },
+  { href: '/ext', label: 'Plugins' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/audit', label: 'Audit' },
 ];
@@ -213,7 +213,13 @@ export function layout(title: string, content: string): string {
     a.row-link:hover td { background: #1f293744; }
     .htmx-indicator { opacity: 0; transition: opacity 0.2s; }
     .htmx-request .htmx-indicator { opacity: 1; }
-    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 120px); }
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 120px);
+      height: calc(100dvh - 120px);
+      min-height: 0;
+    }
     .chat-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
     .chat-header h2 { margin: 0; }
     .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding-bottom: 1rem; }
@@ -325,6 +331,7 @@ export function layout(title: string, content: string): string {
       .table-scroll th { white-space: nowrap; }
       .table-scroll td { white-space: normal; overflow-wrap: break-word; }
       main { padding: 1rem; }
+      .chat-input-bar textarea { font-size: 16px; }
     }
   </style>
 </head>

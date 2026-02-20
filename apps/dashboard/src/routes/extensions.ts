@@ -121,14 +121,14 @@ function renderImportForm(importStatus: string | null, importMessage: string | n
           background: #388bfd;
         }
       </style>
-      <h2>Import Extension</h2>
+      <h2>Import Plugins</h2>
       <p class="meta" style="margin-bottom:0.75rem">Upload one .zip package containing either a skill or a channel.</p>
       ${messageHtml}
       <form action="/ext/import" method="post" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
         <input class="ext-import-file" type="file" name="file" accept=".zip" required>
         <label style="display:flex;align-items:center;gap:0.5rem">
           <input type="checkbox" name="overwrite" value="true">
-          <span class="meta">Overwrite if extension already exists</span>
+          <span class="meta">Overwrite if plugin already exists</span>
         </label>
         <button type="submit" class="btn btn--sm" style="align-self:flex-start">Import</button>
       </form>
@@ -225,7 +225,7 @@ function renderTypeFilter(current: ExtFilterType, params: URLSearchParams): stri
 
 function renderUnifiedExtensionsTable(rows: UnifiedExtensionRow[]): string {
   if (rows.length === 0) {
-    return '<p class="meta">No matching extensions found.</p>';
+    return '<p class="meta">No matching plugins found.</p>';
   }
 
   return `
@@ -242,7 +242,7 @@ function renderUnifiedExtensionsTable(rows: UnifiedExtensionRow[]): string {
     </style>
     <div class="table-scroll">
       <table class="ext-table">
-        <thead><tr><th>Name</th><th>Extension Type</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Name</th><th>Type</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
           ${rows.map((row) => `
             <tr>
@@ -385,13 +385,12 @@ app.get('/ext', async (c) => {
     const filteredRows = extType === 'all' ? unifiedRows : unifiedRows.filter((row) => row.type === extType);
     const pagedRows = paginate(filteredRows, parsePage(url.searchParams.get('page')));
 
-    return c.html(layout('Extensions', `
-      <h1>Extensions</h1>
+    return c.html(layout('Plugins', `
+      <h1>Plugins</h1>
 
       ${renderTypeFilter(extType, searchParams)}
 
       <div class="card">
-        <h2>Extensions</h2>
         ${renderUnifiedExtensionsTable(pagedRows.items)}
         ${renderPager(searchParams, 'page', pagedRows.page, pagedRows.totalPages, pagedRows.totalItems)}
       </div>
@@ -400,7 +399,7 @@ app.get('/ext', async (c) => {
 
     `));
   } catch {
-    return c.html(layout('Extensions', '<h1>Extensions</h1><p class="badge badge--red">Agent unreachable</p>'));
+    return c.html(layout('Plugins', '<h1>Plugins</h1><p class="badge badge--red">Agent unreachable</p>'));
   }
 });
 
