@@ -10,7 +10,7 @@ typecheck:
 	pnpm typecheck
 
 dev: build
-	docker compose up -d qdrant conduit
+	docker compose up -d qdrant
 	pnpm dev
 
 up:
