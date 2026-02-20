@@ -490,8 +490,26 @@ export class ChannelRegistry {
       throw new Error(`Channel already exists: ${channelName}`);
     }
 
-    // Extract to channels directory
-    zip.extractAllTo(channelPath, true);
+    // Extract entries manually to guard against Zip Slip
+    await mkdir(channelPath, { recursive: true });
+    for (const entry of entries) {
+      if (entry.isDirectory) continue;
+
+      // Skip vault files (preserve existing secrets)
+      if (entry.entryName === 'vault.enc' || entry.entryName === 'vault.json') continue;
+      // Skip hidden files and macOS metadata
+      if (entry.entryName.startsWith('.') || entry.entryName.includes('/__MACOSX/')) continue;
+
+      const targetPath = join(channelPath, entry.entryName);
+
+      // Block Zip Slip: ensure extracted path stays within channel directory
+      if (!targetPath.startsWith(channelPath + '/') && targetPath !== channelPath) {
+        throw new Error(`Zip Slip blocked: "${entry.entryName}" escapes the channel directory`);
+      }
+
+      await mkdir(join(targetPath, '..'), { recursive: true });
+      await writeFile(targetPath, entry.getData());
+    }
 
     // Restore existing vault files (never overwrite secrets)
     if (existingVaultEnc) {

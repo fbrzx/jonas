@@ -481,6 +481,12 @@ export class SkillRegistry {
       if (relativePath === 'vault.enc' || relativePath === 'vault.json') continue;
 
       const targetPath = join(skillDir, relativePath);
+
+      // Block Zip Slip: ensure extracted path stays within skill directory
+      if (!targetPath.startsWith(skillDir + '/') && targetPath !== skillDir) {
+        throw new Error(`Zip Slip blocked: "${relativePath}" escapes the skill directory`);
+      }
+
       const targetDir = join(targetPath, '..');
 
       // Ensure parent directory exists

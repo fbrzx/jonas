@@ -536,7 +536,7 @@ app.get('/chat/history/:id', async (c) => {
         const timestamp = m.timestamp ? new Date(m.timestamp).toLocaleString() : '';
         const body = m.role === 'user'
           ? `<pre class="chat-msg__content">${m.content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`
-          : `<div class="chat-msg__content chat-md">${m.content}</div>`;
+          : `<div class="chat-msg__content chat-md">${m.content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
 
         return `
           <div class="${cls}">

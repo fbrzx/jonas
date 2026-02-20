@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { dirname, extname, join, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -177,7 +177,9 @@ app.use('*', async (c, next) => {
   }
 
   const headerToken = c.req.header('x-dashboard-token') ?? '';
-  if (headerToken === expectedToken || hasAuthCookie(c.req.header('cookie'), expectedToken)) {
+  const headerTokenMatches = headerToken.length === expectedToken.length
+    && timingSafeEqual(Buffer.from(headerToken), Buffer.from(expectedToken));
+  if (headerTokenMatches || hasAuthCookie(c.req.header('cookie'), expectedToken)) {
     await next();
     return;
   }

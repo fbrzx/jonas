@@ -194,7 +194,7 @@ export function createApiServer(deps: ApiDeps) {
 
   app.get('/api/model/ollama/list', async (c) => {
     try {
-      const baseUrl = c.req.query('baseUrl') ?? process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
+      const baseUrl = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
 
       const response = await fetch(`${baseUrl}/api/tags`);
       if (!response.ok) {
