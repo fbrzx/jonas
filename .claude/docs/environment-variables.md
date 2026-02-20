@@ -22,11 +22,6 @@ This document lists all environment variables used by the Jonas agent.
 - `QDRANT_URL` - Qdrant vector database URL (default: `http://localhost:6333`)
 - `VOYAGE_API_KEY` - Voyage AI API key for embeddings (required)
 
-### Matrix Chat
-- `MATRIX_HOMESERVER` - Matrix homeserver URL
-- `MATRIX_BOT_USERNAME` - Matrix bot username
-- `MATRIX_BOT_PASSWORD` - Matrix bot password (required)
-
 ### Gateway
 - `GATEWAY_PORT` - WebSocket gateway port (default: `18789`)
 - `GATEWAY_TOKEN` - Shared secret for WebSocket gateway upgrades via `/ws?token=...` (required). Missing/invalid token rejects connections.
@@ -34,14 +29,6 @@ This document lists all environment variables used by the Jonas agent.
 ### Dashboard
 - `DASHBOARD_PORT` - Dashboard HTTP port (default: `3000`)
 - `DASHBOARD_TOKEN` - Dashboard authentication token (required). If unset, dashboard access is blocked.
-
-### Telegram Bot
-- `TELEGRAM_BOT_TOKEN` - Telegram bot token from @BotFather (required)
-- `TELEGRAM_MODE` - Bot mode: `webhook` or `polling` (default: `webhook`)
-- `TELEGRAM_WEBHOOK_URL` - Public webhook URL (e.g., `https://your-domain.com/webhook`) - for webhook mode
-- `TELEGRAM_WEBHOOK_SECRET` - Optional secret token for webhook verification - for webhook mode
-- `TELEGRAM_POLL_INTERVAL` - Polling interval in ms (default: `1000`) - for polling mode
-- `TELEGRAM_BOT_PORT` - Webhook server port (default: `3002`) - for webhook mode
 
 ### General
 - `AGENT_PORT` - Agent API port (default: `3001`)
