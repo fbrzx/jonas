@@ -30,8 +30,8 @@ Always-on personal AI assistant running in Docker. Uses Claude Pro (OAuth) via t
 - `pnpm test` — Run tests
 - `pnpm lint` — Check code style
 - `docker compose up -d` — Start full stack
-- `make dev` — Build + start development
-- `make deploy` — Build + deploy to VM
+- `make up` — Build + start containers
+- `make rebuild` — Rebuild + start containers
 
 ## Environment Variables
 See `env.example` for all required variables. Copy to `.env` and fill in values.
