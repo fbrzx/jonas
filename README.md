@@ -6,7 +6,7 @@ Always-on personal AI assistant running in Docker. Supports both Claude (via CLI
 
 ```bash
 # Install dependencies
-pnpm install
+make install
 
 # Copy environment config
 cp env.example .env
@@ -14,6 +14,9 @@ cp env.example .env
 
 # Start everything
 docker compose up -d
+
+# Stop containers, build and restart containers
+make rebuild 
 ```
 
 ## Model Providers
@@ -53,9 +56,6 @@ You can also configure the model provider via the dashboard UI at runtime. See `
 ## Development
 
 ```bash
-make install      # Install dependencies
-make rebuild      # Stop containers, build and restart containers
-
 pnpm dev          # Start development mode
 pnpm build        # Build all packages
 pnpm test         # Run tests
