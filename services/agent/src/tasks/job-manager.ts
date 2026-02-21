@@ -26,6 +26,8 @@ export class BackgroundJobManager {
   private jobs: BackgroundJob[] = [];
   private activeCount = 0;
   private queue: BackgroundJob[] = [];
+  // Serializes concurrent persist() calls to prevent .tmp rename races
+  private persistChain: Promise<void> = Promise.resolve();
 
   constructor(opts: JobManagerOptions) {
     this.agent = opts.agent;
@@ -260,7 +262,9 @@ export class BackgroundJobManager {
     }
   }
 
-  private async persist(): Promise<void> {
-    await saveJobs(this.storagePath, this.jobs);
+  private persist(): Promise<void> {
+    // Chain onto the previous persist so concurrent callers never overlap on the .tmp file
+    this.persistChain = this.persistChain.then(() => saveJobs(this.storagePath, this.jobs));
+    return this.persistChain;
   }
 }
