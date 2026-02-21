@@ -11,6 +11,7 @@ import type { EmbeddingClient } from '../memory/embeddings.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { ModelProvider, ProviderMessage, ProviderTool } from './providers/base.js';
 import type { ConversationDatabase } from '../storage/database.js';
+import type { BackgroundJobManager } from '../tasks/job-manager.js';
 
 const log = createLogger('agent-core');
 const VAULT_PATH = process.env.VAULT_PATH ?? '/data/vault';
@@ -30,6 +31,7 @@ export interface AgentCoreOptions {
   mcpConfigPath: string;
   skillRegistry?: SkillRegistry;
   database?: ConversationDatabase;
+  jobManager?: BackgroundJobManager;
 }
 
 export class AgentCore {
@@ -42,6 +44,7 @@ export class AgentCore {
   private mcpConfigPath: string;
   private skillRegistry?: SkillRegistry;
   private database?: ConversationDatabase;
+  private jobManager?: BackgroundJobManager;
   private auditLog: AuditEntry[] = []; // Keep last 100 in memory for quick access
   private startedAt = Date.now();
   private abortControllers = new Map<string, AbortController>();
@@ -55,6 +58,12 @@ export class AgentCore {
     this.mcpConfigPath = opts.mcpConfigPath;
     this.skillRegistry = opts.skillRegistry;
     this.database = opts.database;
+    this.jobManager = opts.jobManager;
+  }
+
+  /** Allow late injection of job manager (avoids circular dependency) */
+  setJobManager(jobManager: BackgroundJobManager): void {
+    this.jobManager = jobManager;
   }
 
   get uptime(): number {
@@ -449,6 +458,54 @@ export class AgentCore {
           required: ['dirName', 'skillMd'],
         },
       },
+      {
+        name: 'job_run',
+        description:
+          'Spawn a background sub-agent to execute a task asynchronously. Returns a job ID immediately. Use this for long-running tasks so you can respond to the user right away. The job runs independently and delivers its result to the target channel when done.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Short human-readable name for the job' },
+            prompt: { type: 'string', description: 'The full instruction for the sub-agent to execute' },
+            targetChannelType: { type: 'string', description: 'Channel type to deliver the result to (e.g. "telegram")' },
+            targetChannelId: { type: 'string', description: 'Channel ID for result delivery' },
+            timeoutMs: { type: 'number', description: 'Timeout in milliseconds (default: 600000 = 10min)' },
+          },
+          required: ['name', 'prompt'],
+        },
+      },
+      {
+        name: 'job_status',
+        description: 'Check the status and result of a background job by ID.',
+        parameters: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Job ID returned by job_run' },
+          },
+          required: ['id'],
+        },
+      },
+      {
+        name: 'job_list',
+        description: 'List recent background jobs with their statuses.',
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'Maximum number of jobs to return (default: 20)' },
+          },
+        },
+      },
+      {
+        name: 'job_cancel',
+        description: 'Cancel a queued or running background job.',
+        parameters: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Job ID to cancel' },
+          },
+          required: ['id'],
+        },
+      },
     ];
 
     return tools;
@@ -640,6 +697,100 @@ export class AgentCore {
         });
 
         return { success: true, skill: created };
+      }
+
+      case 'job_run': {
+        if (!this.jobManager) {
+          return { error: 'Job manager unavailable: not configured' };
+        }
+
+        const jobName = String(input.name ?? '').trim();
+        const jobPrompt = String(input.prompt ?? '').trim();
+        if (!jobName || !jobPrompt) {
+          return { error: 'Invalid input for job_run: name and prompt are required' };
+        }
+
+        const targetChannel =
+          typeof input.targetChannelType === 'string' && typeof input.targetChannelId === 'string'
+            ? { type: input.targetChannelType, id: input.targetChannelId }
+            : undefined;
+
+        const timeoutMs =
+          typeof input.timeoutMs === 'number' && input.timeoutMs > 0
+            ? input.timeoutMs
+            : undefined;
+
+        const job = await this.jobManager.spawn({ name: jobName, prompt: jobPrompt, targetChannel, timeoutMs });
+        return {
+          jobId: job.id,
+          status: job.status,
+          message: `Background sub-agent spawned as job "${job.name}" (ID: ${job.id}). It will run independently and ${targetChannel ? `deliver results to ${targetChannel.type}:${targetChannel.id}` : 'store results for retrieval via job_status'}.`,
+        };
+      }
+
+      case 'job_status': {
+        if (!this.jobManager) {
+          return { error: 'Job manager unavailable: not configured' };
+        }
+
+        const jobId = String(input.id ?? '').trim();
+        if (!jobId) {
+          return { error: 'Invalid input for job_status: id is required' };
+        }
+
+        const job = this.jobManager.get(jobId);
+        if (!job) {
+          return { error: `Job not found: ${jobId}` };
+        }
+
+        return {
+          id: job.id,
+          name: job.name,
+          status: job.status,
+          createdAt: job.createdAt,
+          startedAt: job.startedAt,
+          completedAt: job.completedAt,
+          result: job.result,
+          error: job.error,
+          targetChannel: job.targetChannel,
+        };
+      }
+
+      case 'job_list': {
+        if (!this.jobManager) {
+          return { error: 'Job manager unavailable: not configured' };
+        }
+
+        const limit = typeof input.limit === 'number' ? Math.max(1, Math.min(100, input.limit)) : 20;
+        const jobs = this.jobManager.list().slice(-limit).map((j) => ({
+          id: j.id,
+          name: j.name,
+          status: j.status,
+          createdAt: j.createdAt,
+          startedAt: j.startedAt,
+          completedAt: j.completedAt,
+          scheduledTaskId: j.scheduledTaskId,
+        }));
+
+        return { count: jobs.length, jobs };
+      }
+
+      case 'job_cancel': {
+        if (!this.jobManager) {
+          return { error: 'Job manager unavailable: not configured' };
+        }
+
+        const jobId = String(input.id ?? '').trim();
+        if (!jobId) {
+          return { error: 'Invalid input for job_cancel: id is required' };
+        }
+
+        const cancelled = await this.jobManager.cancel(jobId);
+        if (!cancelled) {
+          return { error: `Job not found or already in terminal state: ${jobId}` };
+        }
+
+        return { success: true, message: `Job ${jobId} cancelled` };
       }
 
       default:

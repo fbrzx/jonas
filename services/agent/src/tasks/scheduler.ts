@@ -2,18 +2,21 @@ import { Cron } from 'croner';
 import { createLogger, createId, isoNow } from '@jonas/shared/utils';
 import type { ScheduledTask } from '@jonas/shared/types';
 import type { AgentCore } from '../agent/core.js';
+import type { BackgroundJobManager } from './job-manager.js';
 import { loadTasks, saveTasks } from './storage.js';
 
 const log = createLogger('scheduler');
 
 interface SchedulerOptions {
   agent: AgentCore;
+  jobManager: BackgroundJobManager;
   dispatchOutput: (channel: { type: string; id: string }, text: string) => Promise<void>;
   storagePath: string;
 }
 
 export class TaskScheduler {
   private agent: AgentCore;
+  private jobManager: BackgroundJobManager;
   private dispatchOutput: (channel: { type: string; id: string }, text: string) => Promise<void>;
   private storagePath: string;
   private tasks: ScheduledTask[] = [];
@@ -21,6 +24,7 @@ export class TaskScheduler {
 
   constructor(opts: SchedulerOptions) {
     this.agent = opts.agent;
+    this.jobManager = opts.jobManager;
     this.dispatchOutput = opts.dispatchOutput;
     this.storagePath = opts.storagePath;
   }
@@ -46,6 +50,7 @@ export class TaskScheduler {
     cron: string;
     prompt: string;
     targetChannel?: { type: string; id: string };
+    timeoutMs?: number;
   }): Promise<ScheduledTask> {
     const task: ScheduledTask = {
       id: createId('task'),
@@ -56,6 +61,7 @@ export class TaskScheduler {
       status: 'pending',
       enabled: true,
       createdAt: isoNow(),
+      timeoutMs: input.timeoutMs,
     };
 
     this.tasks.push(task);
@@ -83,7 +89,7 @@ export class TaskScheduler {
 
   async update(
     id: string,
-    changes: Partial<Pick<ScheduledTask, 'name' | 'cron' | 'prompt' | 'targetChannel' | 'enabled'>>,
+    changes: Partial<Pick<ScheduledTask, 'name' | 'cron' | 'prompt' | 'targetChannel' | 'enabled' | 'timeoutMs'>>,
   ): Promise<ScheduledTask | null> {
     const task = this.tasks.find((t) => t.id === id);
     if (!task) return null;
@@ -130,16 +136,20 @@ export class TaskScheduler {
     return this.tasks;
   }
 
+  /**
+   * Spawn the task as a background sub-agent job. Returns the job ID immediately.
+   */
   async runNow(id: string): Promise<string | null> {
     const task = this.tasks.find((t) => t.id === id);
     if (!task) return null;
-    return this.execute(task);
+    const job = await this.spawnJob(task);
+    return job.id;
   }
 
   private schedule(task: ScheduledTask): void {
     const job = new Cron(task.cron, () => {
-      this.execute(task).catch((err) => {
-        log.error(err, 'Scheduled task execution failed');
+      this.spawnJob(task).catch((err) => {
+        log.error(err, 'Failed to spawn background job for scheduled task');
       });
     });
     this.jobs.set(task.id, job);
@@ -148,44 +158,56 @@ export class TaskScheduler {
     task.nextRun = next ? next.toISOString() : undefined;
   }
 
-  private async execute(task: ScheduledTask): Promise<string> {
-    log.info({ id: task.id, name: task.name }, 'Executing scheduled task');
+  /**
+   * Dispatch this task to the job manager as a background sub-agent.
+   * Returns immediately with the queued job; execution is non-blocking.
+   */
+  private async spawnJob(task: ScheduledTask): Promise<import('@jonas/shared/types').BackgroundJob> {
+    log.info({ id: task.id, name: task.name }, 'Spawning background sub-agent for scheduled task');
     task.status = 'running';
     task.lastRun = isoNow();
-    await this.persist(); // FIX: Persist 'running' status immediately
+    await this.persist();
 
-    try {
-      const response = await this.agent.chat(
-        task.prompt,
-        { type: 'scheduler', id: task.id },
-        `scheduler:${task.id}`,
-      );
+    const job = await this.jobManager.spawn({
+      name: task.name,
+      prompt: task.prompt,
+      targetChannel: task.targetChannel,
+      scheduledTaskId: task.id,
+      timeoutMs: task.timeoutMs,
+    });
 
-      task.status = 'completed';
-      task.lastResult = response.slice(0, 2000);
-      await this.persist();
+    // Update task status once job settles (non-blocking)
+    this.watchJob(task, job.id);
 
-      // FIX: Handle dispatchOutput errors separately
-      if (task.targetChannel) {
-        try {
-          await this.dispatchOutput(task.targetChannel, response);
-          log.info({ id: task.id, responseLen: response.length }, 'Task completed, output dispatched');
-        } catch (dispatchErr) {
-          log.error({ err: dispatchErr, id: task.id }, 'Failed to dispatch output, but task completed successfully');
-          // Don't mark task as failed - execution succeeded, only delivery failed
-        }
-      } else {
-        log.info({ id: task.id, responseLen: response.length }, 'Task completed (no output channel)');
+    return job;
+  }
+
+  /**
+   * Poll the job manager until the job for this task finishes,
+   * then update the task's status and lastResult.
+   */
+  private watchJob(task: ScheduledTask, jobId: string): void {
+    const check = async (): Promise<void> => {
+      const job = this.jobManager.get(jobId);
+      if (!job) return;
+
+      if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+        task.status = job.status === 'completed' ? 'completed' : 'failed';
+        task.lastResult = (job.result ?? job.error ?? '').slice(0, 2000);
+        await this.persist();
+        log.info({ taskId: task.id, jobId, status: task.status }, 'Scheduled task finished via sub-agent');
+        return;
       }
 
-      return response;
-    } catch (err) {
-      task.status = 'failed';
-      task.lastResult = String(err).slice(0, 2000); // FIX: Truncate error messages too
-      await this.persist();
-      log.error(err, 'Task execution failed');
-      throw err;
-    }
+      // Check again in 5 seconds
+      setTimeout(() => {
+        check().catch((err) => log.warn(err, 'Error watching job status'));
+      }, 5000);
+    };
+
+    setTimeout(() => {
+      check().catch((err) => log.warn(err, 'Error watching job status'));
+    }, 5000);
   }
 
   private async persist(): Promise<void> {

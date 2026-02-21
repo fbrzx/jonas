@@ -346,6 +346,96 @@ server.tool(
   },
 );
 
+// --- Background job tools (call agent API) ---
+
+server.tool(
+  'job_run',
+  'Spawn a background sub-agent to execute a task asynchronously. Returns a job ID immediately. Use this for long-running tasks so you can respond to the user right away. The sub-agent runs independently and delivers results to the target channel when done.',
+  {
+    name: z.string().describe('Short human-readable name for the job'),
+    prompt: z.string().describe('Full instruction for the sub-agent to execute'),
+    targetChannelType: z.string().optional().describe('Channel type to deliver results to (e.g. "telegram")'),
+    targetChannelId: z.string().optional().describe('Channel ID for result delivery'),
+    timeoutMs: z.number().optional().describe('Timeout in milliseconds (default: 600000 = 10min)'),
+  },
+  async ({ name, prompt, targetChannelType, targetChannelId, timeoutMs }) => {
+    const body: Record<string, unknown> = { name, prompt };
+    if (targetChannelType && targetChannelId) {
+      body.targetChannel = { type: targetChannelType, id: targetChannelId };
+    }
+    if (timeoutMs) body.timeoutMs = timeoutMs;
+
+    const res = await apiFetch('/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json() as { error?: string; id?: string; status?: string };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to spawn job' }) }], isError: true };
+    }
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          jobId: data.id,
+          status: data.status,
+          message: `Background sub-agent spawned (job ID: ${data.id}). Running asynchronously.`,
+        }),
+      }],
+    };
+  },
+);
+
+server.tool(
+  'job_status',
+  'Check the status and result of a background job by ID.',
+  {
+    id: z.string().describe('Job ID returned by job_run'),
+  },
+  async ({ id }) => {
+    const res = await apiFetch(`/api/jobs/${encodeURIComponent(id)}`);
+    const data = await res.json() as { error?: string };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Job not found' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+  },
+);
+
+server.tool(
+  'job_list',
+  'List recent background jobs with their statuses.',
+  {
+    limit: z.number().default(20).describe('Maximum number of jobs to return'),
+    status: z.string().optional().describe('Filter by status: queued, running, completed, failed, cancelled'),
+  },
+  async ({ limit, status }) => {
+    const params = new URLSearchParams({ limit: String(limit ?? 20) });
+    if (status) params.set('status', status);
+    const res = await apiFetch(`/api/jobs?${params}`);
+    const data = await res.json() as unknown;
+    return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+  },
+);
+
+server.tool(
+  'job_cancel',
+  'Cancel a queued or running background job.',
+  {
+    id: z.string().describe('Job ID to cancel'),
+  },
+  async ({ id }) => {
+    const res = await apiFetch(`/api/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const data = await res.json() as { error?: string };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to cancel job' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Job ${id} cancelled` }) }] };
+  },
+);
+
 // --- Skill management tools (call agent API) ---
 
 server.tool(
