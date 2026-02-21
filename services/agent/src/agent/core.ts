@@ -276,7 +276,10 @@ export class AgentCore {
       }
 
       if (!fullResponse) {
-        fullResponse = 'I could not produce a final response after tool execution.';
+        fullResponse = this.renderErrorMessage({
+          userMessage: 'Sorry, I could not produce a final response after tool execution. This may be a temporary issue. Please try again or contact support if it persists.',
+          technical: 'No response was generated after tool execution. This may indicate a tool output, formatting, or context/token issue.'
+        });
       }
 
       fullResponse = await this.applyOllamaGrounding(
@@ -292,12 +295,19 @@ export class AgentCore {
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') {
         log.info({ sessionKey: key }, 'Query aborted');
-        fullResponse = '[Query aborted]';
+        fullResponse = this.renderErrorMessage({
+          userMessage: 'Your request was aborted. If this was not intentional, please try again. If the problem persists, contact the operator.',
+          technical: 'AbortError thrown during model/tool execution.'
+        });
       } else {
         log.error(err, 'Model query failed');
         // Re-throw with better context
         const error = err instanceof Error ? err : new Error(String(err));
-        error.message = this.categorizeError(error.message);
+        const friendly = this.categorizeError(error.message);
+        fullResponse = this.renderErrorMessage({
+          userMessage: friendly,
+          technical: error.stack || String(error)
+        });
         throw error;
       }
     } finally {
@@ -1046,6 +1056,19 @@ export class AgentCore {
 
     // If we can't categorize it, return the original message with a prefix
     return `Error: ${message}`;
+  }
+
+  private renderErrorMessage({ userMessage, technical }: { userMessage: string; technical: string }): string {
+    // Use HTML for red border if supported by chat UI, otherwise fallback to Markdown blockquote with emoji
+    return `
+<div style="border:2px solid #e53935;padding:1em;border-radius:8px;background:#fff5f5;color:#b71c1c;margin:1em 0;">
+  <strong>⚠️ ${userMessage}</strong>
+  <details style="margin-top:0.5em;">
+    <summary style="cursor:pointer;">Technical details</summary>
+    <pre style="white-space:pre-wrap;font-size:0.95em;color:#333;background:#fbe9e7;padding:0.5em 1em;border-radius:4px;">${technical}</pre>
+  </details>
+</div>
+`;
   }
 
   private async applyOllamaGrounding(
