@@ -10,6 +10,7 @@ import { MemoryRetriever } from './memory/retriever.js';
 import { MemoryExtractor } from './memory/extractor.js';
 import { createApiServer } from './api/server.js';
 import { TaskScheduler } from './tasks/scheduler.js';
+import { BackgroundJobManager } from './tasks/job-manager.js';
 import { SkillRegistry } from './skills/registry.js';
 import { SkillCryptoStore } from './skills/crypto-store.js';
 import { OAuthProviderStore } from './oauth/provider-store.js';
@@ -161,19 +162,39 @@ async function main() {
     database,
   });
 
+  // Shared output dispatcher — sends task/job results to channels
+  const dispatchOutput = async (channel: { type: string; id: string }, text: string): Promise<void> => {
+    try {
+      await channelRegistry.sendMessage(channel.type, channel.id, text);
+    } catch {
+      log.info({ channel, textLen: text.length }, 'Task/job output (channel delivery failed or not configured)');
+    }
+  };
+
+  // Initialize background job manager
+  const jobManager = new BackgroundJobManager({
+    agent,
+    dispatchOutput,
+    storagePath: '/data/jobs.json',
+  });
+  await jobManager.start();
+  log.info('Background job manager started');
+
+  // Wire job manager into agent core (late injection to avoid circular deps)
+  agent.setJobManager(jobManager);
+
   // Initialize task scheduler
   const scheduler = new TaskScheduler({
     agent,
-    dispatchOutput: async (channel, text) => {
-      log.info({ channel, textLen: text.length }, 'Task output (no delivery channel configured)');
-    },
+    jobManager,
+    dispatchOutput,
     storagePath: '/data/tasks.json',
   });
   await scheduler.start();
   log.info('Task scheduler started');
 
   // Start internal API server
-  const api = createApiServer({ agent, memory, retriever, scheduler, skillRegistry, oauthProviderStore, oauthHandler, database, channelRegistry, pairingService, connectionManager });
+  const api = createApiServer({ agent, memory, retriever, scheduler, jobManager, skillRegistry, oauthProviderStore, oauthHandler, database, channelRegistry, pairingService, connectionManager });
   const port = Number(process.env.AGENT_PORT ?? 3001);
 
   const { serve } = await import('@hono/node-server');

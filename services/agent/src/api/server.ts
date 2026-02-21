@@ -6,6 +6,7 @@ import type { AgentCore } from '../agent/core.js';
 import type { MemoryClient } from '../memory/client.js';
 import type { MemoryRetriever } from '../memory/retriever.js';
 import type { TaskScheduler } from '../tasks/scheduler.js';
+import type { BackgroundJobManager } from '../tasks/job-manager.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { OAuthProviderStore } from '../oauth/provider-store.js';
 import type { OAuthHandler } from '../oauth/handler.js';
@@ -23,6 +24,7 @@ interface ApiDeps {
   memory: MemoryClient;
   retriever: MemoryRetriever;
   scheduler?: TaskScheduler;
+  jobManager?: BackgroundJobManager;
   skillRegistry?: SkillRegistry;
   oauthProviderStore?: OAuthProviderStore;
   oauthHandler?: OAuthHandler;
@@ -503,13 +505,62 @@ export function createApiServer(deps: ApiDeps) {
     if (!deps.scheduler) return c.json({ error: 'Scheduler not available' }, 503);
     const id = c.req.param('id');
     try {
-      const result = await deps.scheduler.runNow(id);
-      if (result === null) return c.json({ error: 'Task not found' }, 404);
-      return c.json({ result });
+      const jobId = await deps.scheduler.runNow(id);
+      if (jobId === null) return c.json({ error: 'Task not found' }, 404);
+      return c.json({ jobId, message: `Task dispatched as background job ${jobId}` });
     } catch (err) {
       log.error(err, 'Manual task run failed');
       return c.json({ error: 'Task execution failed' }, 500);
     }
+  });
+
+  // --- Background job endpoints ---
+
+  app.get('/api/jobs', (c) => {
+    if (!deps.jobManager) return c.json({ error: 'Job manager not available' }, 503);
+    const limit = Number(c.req.query('limit') ?? 50);
+    const status = c.req.query('status') as string | undefined;
+    let jobs = deps.jobManager.list();
+    if (status) {
+      jobs = jobs.filter((j) => j.status === status);
+    }
+    return c.json(jobs.slice(-Math.min(limit, 200)));
+  });
+
+  app.post('/api/jobs', async (c) => {
+    if (!deps.jobManager) return c.json({ error: 'Job manager not available' }, 503);
+    const body = await c.req.json<{
+      name: string;
+      prompt: string;
+      targetChannel?: { type: string; id: string };
+      timeoutMs?: number;
+    }>();
+    if (!body.name || !body.prompt) {
+      return c.json({ error: 'Missing required fields: name, prompt' }, 400);
+    }
+    try {
+      const job = await deps.jobManager.spawn(body);
+      return c.json(job, 202);
+    } catch (err) {
+      log.error(err, 'Failed to spawn background job');
+      return c.json({ error: 'Failed to spawn job' }, 500);
+    }
+  });
+
+  app.get('/api/jobs/:id', (c) => {
+    if (!deps.jobManager) return c.json({ error: 'Job manager not available' }, 503);
+    const id = c.req.param('id');
+    const job = deps.jobManager.get(id);
+    if (!job) return c.json({ error: 'Job not found' }, 404);
+    return c.json(job);
+  });
+
+  app.delete('/api/jobs/:id', async (c) => {
+    if (!deps.jobManager) return c.json({ error: 'Job manager not available' }, 503);
+    const id = c.req.param('id');
+    const cancelled = await deps.jobManager.cancel(id);
+    if (!cancelled) return c.json({ error: 'Job not found or already in terminal state' }, 404);
+    return c.json({ success: true });
   });
 
   // --- Skill endpoints ---

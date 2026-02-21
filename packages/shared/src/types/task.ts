@@ -12,4 +12,6 @@ export interface ScheduledTask {
   lastResult?: string;
   enabled: boolean;
   createdAt: string;
+  /** Timeout for each execution in milliseconds (default: 600000 = 10min) */
+  timeoutMs?: number;
 }
