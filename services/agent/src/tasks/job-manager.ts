@@ -1,6 +1,7 @@
 import { createLogger, createId, isoNow } from '@jonas/shared/utils';
 import type { BackgroundJob, JobStatus } from '@jonas/shared/types';
 import type { AgentCore } from '../agent/core.js';
+import type { ConversationDatabase } from '../storage/database.js';
 import { loadJobs, saveJobs } from './job-storage.js';
 
 const log = createLogger('job-manager');
@@ -14,12 +15,14 @@ interface JobManagerOptions {
   agent: AgentCore;
   dispatchOutput: (channel: { type: string; id: string }, text: string) => Promise<void>;
   storagePath: string;
+  database?: ConversationDatabase;
 }
 
 export class BackgroundJobManager {
   private agent: AgentCore;
   private dispatchOutput: (channel: { type: string; id: string }, text: string) => Promise<void>;
   private storagePath: string;
+  private database?: ConversationDatabase;
   private jobs: BackgroundJob[] = [];
   private activeCount = 0;
   private queue: BackgroundJob[] = [];
@@ -28,6 +31,7 @@ export class BackgroundJobManager {
     this.agent = opts.agent;
     this.dispatchOutput = opts.dispatchOutput;
     this.storagePath = opts.storagePath;
+    this.database = opts.database;
   }
 
   async start(): Promise<void> {
@@ -38,6 +42,7 @@ export class BackgroundJobManager {
         job.status = 'failed';
         job.error = 'Agent restarted while job was running';
         job.completedAt = isoNow();
+        this.auditLog('job.interrupted', job, { reason: 'agent_restart' });
       }
     }
     this.jobs = persisted;
@@ -71,6 +76,7 @@ export class BackgroundJobManager {
     this.jobs.push(job);
     await this.persist();
 
+    this.auditLog('job.queued', job);
     log.info({ id: job.id, name: job.name, activeCount: this.activeCount }, 'Job queued');
 
     if (this.activeCount < MAX_CONCURRENT_JOBS) {
@@ -104,6 +110,8 @@ export class BackgroundJobManager {
     job.status = 'cancelled';
     job.completedAt = isoNow();
     await this.persist();
+
+    this.auditLog('job.cancelled', job);
     log.info({ id }, 'Job cancelled');
     return true;
   }
@@ -128,10 +136,12 @@ export class BackgroundJobManager {
     job.startedAt = isoNow();
     await this.persist();
 
+    this.auditLog('job.started', job);
     log.info({ id: job.id, name: job.name, activeCount: this.activeCount }, 'Sub-agent job starting');
 
     const timeoutMs = job.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     let timeoutHandle: NodeJS.Timeout | undefined;
+    const startMs = Date.now();
 
     try {
       const result = await Promise.race([
@@ -152,6 +162,7 @@ export class BackgroundJobManager {
       job.completedAt = isoNow();
       await this.persist();
 
+      this.auditLog('job.completed', job, { durationMs: Date.now() - startMs });
       log.info({ id: job.id, resultLen: result.length }, 'Sub-agent job completed');
 
       if (job.targetChannel) {
@@ -168,6 +179,8 @@ export class BackgroundJobManager {
         job.error = String(err).slice(0, 2000);
         job.completedAt = isoNow();
         await this.persist();
+
+        this.auditLog('job.failed', job, { durationMs: Date.now() - startMs, error: job.error });
         log.error({ err, id: job.id }, 'Sub-agent job failed');
 
         if (job.targetChannel) {
@@ -216,6 +229,35 @@ export class BackgroundJobManager {
     this.persist().catch((err) => {
       log.warn(err, 'Failed to persist jobs after completion');
     });
+  }
+
+  private auditLog(
+    action: string,
+    job: BackgroundJob,
+    extra: { durationMs?: number; error?: string; reason?: string } = {},
+  ): void {
+    if (!this.database) return;
+    try {
+      this.database.logAudit({
+        timestamp: isoNow(),
+        action,
+        details: JSON.stringify({
+          name: job.name,
+          scheduledTaskId: job.scheduledTaskId,
+          promptLen: job.prompt.length,
+          targetChannel: job.targetChannel,
+          ...(extra.error ? { error: extra.error } : {}),
+          ...(extra.reason ? { reason: extra.reason } : {}),
+        }),
+        channelType: job.targetChannel?.type ?? 'job',
+        channelId: job.targetChannel?.id ?? job.id,
+        sessionKey: job.sessionKey,
+        jobId: job.id,
+        durationMs: extra.durationMs,
+      });
+    } catch (err) {
+      log.warn({ err, action, jobId: job.id }, 'Failed to write job audit entry');
+    }
   }
 
   private async persist(): Promise<void> {

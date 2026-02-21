@@ -176,6 +176,7 @@ async function main() {
     agent,
     dispatchOutput,
     storagePath: '/data/jobs.json',
+    database,
   });
   await jobManager.start();
   log.info('Background job manager started');
