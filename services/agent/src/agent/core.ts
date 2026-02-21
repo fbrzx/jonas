@@ -21,6 +21,7 @@ const TOOL_TIMEOUT_MS = Number(process.env.AGENT_TOOL_TIMEOUT_MS ?? 15000);
 const MAX_TOOL_REPEAT = Number(process.env.AGENT_TOOL_MAX_REPEAT ?? 2);
 const MAX_TOOL_TURNS = Number(process.env.AGENT_TOOL_MAX_TURNS ?? 4);
 const OLLAMA_TOOLS_ENABLED = String(process.env.AGENT_OLLAMA_TOOLS_ENABLED ?? 'false').toLowerCase() === 'true';
+const OLLAMA_GROUNDING_MODE = String(process.env.AGENT_OLLAMA_GROUNDING_MODE ?? 'warn').toLowerCase();
 
 export interface AgentCoreOptions {
   retriever: MemoryRetriever;
@@ -82,6 +83,42 @@ export class AgentCore {
     return this.provider.getName();
   }
 
+  private recordAuditEvent(params: {
+    action: string;
+    channel: Channel;
+    sessionKey: string;
+    conversationId: string;
+    details?: Record<string, unknown>;
+    model?: string;
+    durationMs?: number;
+  }): void {
+    const entry: AuditEntry = {
+      id: createId('audit'),
+      timestamp: isoNow(),
+      action: params.action,
+      channel: params.channel.type,
+      conversationId: params.conversationId,
+    };
+
+    this.auditLog.push(entry);
+    if (this.auditLog.length > 100) {
+      this.auditLog.shift();
+    }
+
+    if (!this.database) return;
+
+    this.database.logAudit({
+      timestamp: entry.timestamp,
+      action: params.action,
+      details: params.details ? JSON.stringify(params.details) : undefined,
+      channelType: params.channel.type,
+      channelId: params.channel.id,
+      sessionKey: params.sessionKey,
+      model: params.model,
+      durationMs: params.durationMs,
+    });
+  }
+
   async chat(
     userMessage: string,
     channel: Channel,
@@ -112,7 +149,9 @@ export class AgentCore {
 
     const memories = await this.retriever.retrieve(userMessage);
     const skillPrompts = this.skillRegistry?.getEnabledPrompts();
-    const systemPrompt = assembleSystemPrompt(memories, skillPrompts);
+    const systemPrompt = assembleSystemPrompt(memories, skillPrompts, {
+      providerName: this.provider.getName(),
+    });
 
     // Rebuild MCP config with current skill servers
     await this.rebuildMcpConfig();
@@ -134,6 +173,7 @@ export class AgentCore {
     this.abortControllers.set(key, abortController);
 
     let fullResponse = '';
+    const executedToolNames = new Set<string>();
 
     try {
       log.info({ channel: channel.type, sessionKey: key, historyLen: session.messages.length }, 'Sending query to model provider');
@@ -149,6 +189,9 @@ export class AgentCore {
       const maxTurns = MAX_TOOL_TURNS;
       const modelTurnTimeoutMs = this.getModelTurnTimeoutMs();
       const toolCallCounts = new Map<string, number>();
+      const groundedVaultPaths = new Set<string>();
+      const groundedJobIds = new Set<string>();
+      const groundedMemoryIds = new Set<string>();
 
       for (let turn = 0; turn < maxTurns; turn++) {
         const turnAbortController = new AbortController();
@@ -201,6 +244,25 @@ export class AgentCore {
             TOOL_TIMEOUT_MS,
             `Tool ${call.name} timed out after ${TOOL_TIMEOUT_MS}ms`,
           );
+
+          const action = call.name.startsWith('memory_') ? 'memory' : 'tool_use';
+          this.recordAuditEvent({
+            action,
+            channel,
+            sessionKey: key,
+            conversationId: session.id,
+            details: {
+              description: `Executed ${action === 'memory' ? 'memory' : 'tool'}: ${call.name}`,
+              tool: call.name,
+              inputKeys: Object.keys(call.input ?? {}),
+              success: typeof toolResult.error !== 'string',
+              ...(typeof toolResult.error === 'string' ? { error: toolResult.error } : {}),
+            },
+          });
+
+          executedToolNames.add(call.name);
+          this.collectGroundedVaultPaths(call.name, toolResult, groundedVaultPaths);
+          this.collectGroundedIds(call.name, toolResult, groundedJobIds, groundedMemoryIds);
           providerMessages.push({
             role: 'tool',
             name: call.name,
@@ -216,6 +278,14 @@ export class AgentCore {
       if (!fullResponse) {
         fullResponse = 'I could not produce a final response after tool execution.';
       }
+
+      fullResponse = await this.applyOllamaGrounding(
+        fullResponse,
+        executedToolNames,
+        groundedVaultPaths,
+        groundedJobIds,
+        groundedMemoryIds,
+      );
 
       onDelta?.(fullResponse);
 
@@ -279,31 +349,20 @@ export class AgentCore {
       log.warn(err, 'Memory extraction failed');
     });
 
-    const auditEntry: AuditEntry = {
-      id: createId('audit'),
-      timestamp: isoNow(),
+    this.recordAuditEvent({
       action: 'chat',
-      channel: channel.type,
+      channel,
+      sessionKey: key,
       conversationId: session.id,
-    };
-
-    // Add to in-memory log (keep last 100)
-    this.auditLog.push(auditEntry);
-    if (this.auditLog.length > 100) {
-      this.auditLog.shift();
-    }
-
-    // Persist to database
-    if (this.database) {
-      this.database.logAudit({
-        timestamp: auditEntry.timestamp,
-        action: auditEntry.action,
-        details: JSON.stringify({ conversationId: auditEntry.conversationId }),
-        channelType: channel.type,
-        channelId: channel.id,
-        sessionKey: key,
-      });
-    }
+      details: {
+        description: 'Processed chat turn',
+        conversationId: session.id,
+        userMessageLength: userMessage.length,
+        responseLength: fullResponse.length,
+        toolsUsed: Array.from(executedToolNames),
+      },
+      model: this.provider.getName(),
+    });
 
     if (session.messages.length > 20) {
       session.messages = session.messages.slice(-10);
@@ -987,5 +1046,218 @@ export class AgentCore {
 
     // If we can't categorize it, return the original message with a prefix
     return `Error: ${message}`;
+  }
+
+  private async applyOllamaGrounding(
+    response: string,
+    executedToolNames: Set<string>,
+    groundedVaultPaths: Set<string>,
+    groundedJobIds: Set<string>,
+    groundedMemoryIds: Set<string>,
+  ): Promise<string> {
+    if (!this.provider.getName().startsWith('ollama:')) {
+      return response;
+    }
+
+    const groundingMode = OLLAMA_GROUNDING_MODE === 'off' || OLLAMA_GROUNDING_MODE === 'warn' || OLLAMA_GROUNDING_MODE === 'strict'
+      ? OLLAMA_GROUNDING_MODE
+      : 'warn';
+
+    if (groundingMode === 'off') {
+      return response;
+    }
+
+    const issues: string[] = [];
+
+    const mentionedPaths = this.extractVaultMarkdownPaths(response);
+    if (mentionedPaths.length > 0) {
+      const usedVaultTools = executedToolNames.has('vault_search') || executedToolNames.has('vault_read');
+      if (!usedVaultTools) {
+        issues.push('vault paths were mentioned without vault tool output');
+      } else if (groundedVaultPaths.size === 0) {
+        issues.push('vault paths were mentioned but no grounded vault paths were captured');
+      } else {
+        const unverified = mentionedPaths.filter((path) => !groundedVaultPaths.has(path));
+        if (unverified.length > 0) {
+          issues.push('one or more vault paths were not present in vault tool output');
+        }
+
+        const missingOnDisk = await this.findMissingVaultPaths(mentionedPaths);
+        if (missingOnDisk.length > 0) {
+          issues.push('one or more mentioned vault paths do not exist on disk');
+        }
+      }
+    }
+
+    const mentionedJobIds = this.extractJobIds(response);
+    if (mentionedJobIds.length > 0) {
+      const usedJobTools = executedToolNames.has('job_run') || executedToolNames.has('job_status')
+        || executedToolNames.has('job_list') || executedToolNames.has('job_cancel');
+      if (!usedJobTools) {
+        issues.push('job IDs were mentioned without job tool output');
+      } else {
+        const unverifiedJobs = mentionedJobIds.filter((id) => !groundedJobIds.has(id));
+        if (unverifiedJobs.length > 0) {
+          issues.push('one or more job IDs were not present in job tool output');
+        }
+      }
+    }
+
+    const mentionedMemoryIds = this.extractMemoryUuids(response);
+    if (mentionedMemoryIds.length > 0) {
+      const usedMemoryTools = executedToolNames.has('memory_remember') || executedToolNames.has('memory_recall')
+        || executedToolNames.has('memory_forget');
+      if (!usedMemoryTools) {
+        issues.push('memory IDs were mentioned without memory tool output');
+      } else {
+        const unverifiedMemory = mentionedMemoryIds.filter((id) => !groundedMemoryIds.has(id));
+        if (unverifiedMemory.length > 0) {
+          issues.push('one or more memory IDs were not present in memory tool output');
+        }
+      }
+    }
+
+    if (issues.length === 0) {
+      return response;
+    }
+
+    if (groundingMode === 'strict') {
+      return 'I can’t verify parts of my previous response against tool output. Please let me run the relevant tool again.';
+    }
+
+    return `${response}\n\n[Grounding warning: some claims could not be verified from tool output in this turn.]`;
+  }
+
+  private async findMissingVaultPaths(paths: string[]): Promise<string[]> {
+    const missing: string[] = [];
+    for (const path of paths) {
+      try {
+        const fullPath = this.safeVaultPath(path);
+        await readFile(fullPath, 'utf-8');
+      } catch {
+        missing.push(path);
+      }
+    }
+    return missing;
+  }
+
+  private collectGroundedIds(
+    toolName: string,
+    toolResult: Record<string, unknown>,
+    groundedJobIds: Set<string>,
+    groundedMemoryIds: Set<string>,
+  ): void {
+    if (toolName === 'job_run' && typeof toolResult.jobId === 'string') {
+      const id = this.normalizeJobId(toolResult.jobId);
+      if (id) groundedJobIds.add(id);
+    }
+
+    if (toolName === 'job_status' && typeof toolResult.id === 'string') {
+      const id = this.normalizeJobId(toolResult.id);
+      if (id) groundedJobIds.add(id);
+    }
+
+    if (toolName === 'job_list' && Array.isArray(toolResult.jobs)) {
+      for (const job of toolResult.jobs) {
+        if (!job || typeof job !== 'object') continue;
+        const maybeId = (job as Record<string, unknown>).id;
+        if (typeof maybeId !== 'string') continue;
+        const id = this.normalizeJobId(maybeId);
+        if (id) groundedJobIds.add(id);
+      }
+    }
+
+    if (toolName === 'job_cancel' && typeof toolResult.message === 'string') {
+      for (const id of this.extractJobIds(toolResult.message)) {
+        groundedJobIds.add(id);
+      }
+    }
+
+    if ((toolName === 'memory_remember' || toolName === 'memory_forget') && typeof toolResult.id === 'string') {
+      const id = this.normalizeMemoryUuid(toolResult.id);
+      if (id) groundedMemoryIds.add(id);
+    }
+
+    if (toolName === 'memory_recall' && Array.isArray(toolResult.memories)) {
+      for (const memory of toolResult.memories) {
+        if (!memory || typeof memory !== 'object') continue;
+        const maybeId = (memory as Record<string, unknown>).id;
+        if (typeof maybeId !== 'string') continue;
+        const id = this.normalizeMemoryUuid(maybeId);
+        if (id) groundedMemoryIds.add(id);
+      }
+    }
+  }
+
+  private collectGroundedVaultPaths(
+    toolName: string,
+    toolResult: Record<string, unknown>,
+    groundedVaultPaths: Set<string>,
+  ): void {
+    if (toolName === 'vault_read') {
+      const path = typeof toolResult.path === 'string' ? this.normalizeVaultPath(toolResult.path) : undefined;
+      if (path) groundedVaultPaths.add(path);
+      return;
+    }
+
+    if (toolName === 'vault_search') {
+      const results = Array.isArray(toolResult.results)
+        ? toolResult.results
+        : [];
+      for (const row of results) {
+        if (!row || typeof row !== 'object') continue;
+        const maybePath = (row as Record<string, unknown>).path;
+        if (typeof maybePath === 'string') {
+          const path = this.normalizeVaultPath(maybePath);
+          if (path) groundedVaultPaths.add(path);
+        }
+      }
+    }
+  }
+
+  private extractVaultMarkdownPaths(text: string): string[] {
+    const matches = text.match(/(?:^|[^A-Za-z0-9._\/-])([A-Za-z0-9._\/-]+\.md)(?=$|[^A-Za-z0-9._\/-])/g) ?? [];
+    const normalized = matches
+      .map((raw) => raw.trim().replace(/^[^A-Za-z0-9._\/-]+/, ''))
+      .map((value) => this.normalizeVaultPath(value))
+      .filter((value): value is string => Boolean(value));
+    return [...new Set(normalized)];
+  }
+
+  private normalizeVaultPath(value: string): string | undefined {
+    const normalized = value.trim().replace(/^\.\//, '');
+    if (!normalized.toLowerCase().endsWith('.md')) return undefined;
+    if (normalized.includes('..')) return undefined;
+    return normalized;
+  }
+
+  private extractJobIds(text: string): string[] {
+    const matches = text.match(/\b(job_[A-Za-z0-9_-]{8,})\b/g) ?? [];
+    const normalized = matches
+      .map((value) => this.normalizeJobId(value))
+      .filter((value): value is string => Boolean(value));
+    return [...new Set(normalized)];
+  }
+
+  private normalizeJobId(value: string): string | undefined {
+    const normalized = value.trim();
+    if (!/^job_[A-Za-z0-9_-]{8,}$/.test(normalized)) return undefined;
+    return normalized;
+  }
+
+  private extractMemoryUuids(text: string): string[] {
+    const matches = text.match(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b/g) ?? [];
+    const normalized = matches
+      .map((value) => this.normalizeMemoryUuid(value))
+      .filter((value): value is string => Boolean(value));
+    return [...new Set(normalized)];
+  }
+
+  private normalizeMemoryUuid(value: string): string | undefined {
+    const normalized = value.trim().toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalized)) {
+      return undefined;
+    }
+    return normalized;
   }
 }

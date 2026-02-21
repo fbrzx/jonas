@@ -96,6 +96,7 @@ Per-skill API keys are stored encrypted and injected as env vars into the tool s
 export function assembleSystemPrompt(
   memories: MemorySearchResult[],
   skillPrompts?: string[],
+  options?: { providerName?: string },
 ): string {
   const parts = [BASE_PROMPT];
 
@@ -113,6 +114,18 @@ export function assembleSystemPrompt(
       parts.push(prompt);
       parts.push('');
     }
+  }
+
+  if (options?.providerName?.startsWith('ollama:')) {
+    parts.push('\n## Ollama Tool-Use Rules\n');
+    parts.push('You are running on a local Ollama model. Keep tool usage minimal and deterministic.');
+    parts.push('Use at most ONE tool call before giving a short natural-language response.');
+    parts.push('If one tool result is insufficient, ask a brief follow-up question instead of chaining tools.');
+    parts.push('Only call tools that are explicitly listed in the "Available Tools" section above.');
+    parts.push('Never invent tool names from skill text if they are not in "Available Tools".');
+    parts.push('When a skill mentions unavailable tools, map the task to available tools, otherwise explain the limitation clearly.');
+    parts.push('Never claim a vault markdown file exists unless its exact path appeared in vault_search or vault_read tool output in this same turn.');
+    parts.push('Never claim a job ID or memory ID unless that exact ID appeared in job/memory tool output in this same turn.');
   }
 
   const prompt = parts.join('\n');

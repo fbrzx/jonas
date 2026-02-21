@@ -46,8 +46,40 @@ function parseDetails(details?: string): Record<string, unknown> {
   }
 }
 
-function summarizeDetails(details: Record<string, unknown>): string {
-  const candidateKeys = ['message', 'prompt', 'tool', 'toolName', 'query', 'result', 'error', 'conversationId'];
+function summarizeDetails(action: string, details: Record<string, unknown>): string {
+  if (typeof details.description === 'string' && details.description.trim()) {
+    const description = details.description.replace(/\s+/g, ' ').trim();
+
+    if (action === 'chat') {
+      const userLen = typeof details.userMessageLength === 'number' ? details.userMessageLength : undefined;
+      const responseLen = typeof details.responseLength === 'number' ? details.responseLength : undefined;
+      const toolsUsed = Array.isArray(details.toolsUsed) ? details.toolsUsed.length : 0;
+      const extras: string[] = [];
+      if (typeof userLen === 'number') extras.push(`user ${userLen} chars`);
+      if (typeof responseLen === 'number') extras.push(`assistant ${responseLen} chars`);
+      if (toolsUsed > 0) extras.push(`${toolsUsed} tool${toolsUsed === 1 ? '' : 's'}`);
+      if (extras.length > 0) {
+        return `${description} (${extras.join(', ')})`;
+      }
+    }
+
+    if (action === 'tool_use' || action === 'memory') {
+      const tool = typeof details.tool === 'string' ? details.tool : undefined;
+      const success = details.success === true ? 'success' : details.success === false ? 'failed' : undefined;
+      const extras = [tool, success].filter(Boolean);
+      if (extras.length > 0) {
+        return `${description} (${extras.join(', ')})`;
+      }
+    }
+
+    return description.length > 140 ? `${description.slice(0, 140)}...` : description;
+  }
+
+  if (action === 'chat' && typeof details.conversationId === 'string' && details.conversationId.trim()) {
+    return 'Processed chat turn';
+  }
+
+  const candidateKeys = ['description', 'message', 'tool', 'toolName', 'error', 'conversationId', 'jobId'];
   for (const key of candidateKeys) {
     const value = details[key];
     if (typeof value === 'string' && value.trim()) {
@@ -154,7 +186,7 @@ function renderTable(response: AuditResponse | AuditEntry[]): string {
 
   const rows = logs.map((e) => {
     const details = parseDetails(e.details);
-    const summary = summarizeDetails(details);
+    const summary = summarizeDetails(e.action, details);
     const status = statusLabel(e, details);
     return `
       <tr>

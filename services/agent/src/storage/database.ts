@@ -39,6 +39,9 @@ export interface AuditRow {
 export class ConversationDatabase {
   private db: Database.Database;
 
+  private static readonly SECRET_KEY_RE = /(secret|token|password|passphrase|api[_-]?key|authorization|cookie|private[_-]?key|oauth)/i;
+  private static readonly SENSITIVE_PAYLOAD_KEY_RE = /^(content|prompt|query|result|input|output|memory|memories|embedding|vector|raw|response)$/i;
+
   constructor(dbPath: string) {
     log.info({ dbPath }, 'Initializing conversation database');
     this.db = new Database(dbPath);
@@ -179,6 +182,8 @@ export class ConversationDatabase {
 
   // Audit log methods
   logAudit(entry: Omit<AuditRow, 'id' | 'createdAt'>): void {
+    const sanitizedDetails = this.sanitizeAuditDetails(entry.action, entry.details);
+
     const stmt = this.db.prepare(`
       INSERT INTO audit_log (timestamp, action, details, channel_type, channel_id, session_key, job_id, model, tokens_used, duration_ms)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -186,7 +191,7 @@ export class ConversationDatabase {
     stmt.run(
       entry.timestamp,
       entry.action,
-      entry.details ?? null,
+      sanitizedDetails ?? null,
       entry.channelType ?? null,
       entry.channelId ?? null,
       entry.sessionKey ?? null,
@@ -195,6 +200,96 @@ export class ConversationDatabase {
       entry.tokensUsed ?? null,
       entry.durationMs ?? null,
     );
+  }
+
+  private sanitizeAuditDetails(action: string, details?: string): string {
+    const description = this.defaultDescription(action);
+    if (!details || !details.trim()) {
+      return JSON.stringify({ description });
+    }
+
+    try {
+      const parsed = JSON.parse(details) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const sanitized = this.sanitizeValue(parsed) as Record<string, unknown>;
+        if (typeof sanitized.description !== 'string' || !sanitized.description.trim()) {
+          sanitized.description = description;
+        }
+        return JSON.stringify(sanitized);
+      }
+    } catch {
+      // Fallback below for non-JSON legacy details
+    }
+
+    const redacted = this.redactText(details);
+    return JSON.stringify({
+      description,
+      note: redacted.length > 200 ? `${redacted.slice(0, 200)}...` : redacted,
+    });
+  }
+
+  private sanitizeValue(value: unknown, parentKey?: string): unknown {
+    if (value === null || value === undefined) return value;
+
+    if (typeof value === 'string') {
+      if (parentKey && ConversationDatabase.SENSITIVE_PAYLOAD_KEY_RE.test(parentKey)) {
+        return '[REDACTED]';
+      }
+      const redacted = this.redactText(value);
+      return redacted.length > 400 ? `${redacted.slice(0, 400)}...` : redacted;
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      if (parentKey && ConversationDatabase.SENSITIVE_PAYLOAD_KEY_RE.test(parentKey)) {
+        return '[REDACTED]';
+      }
+      return value.slice(0, 20).map((item) => this.sanitizeValue(item, parentKey));
+    }
+
+    if (typeof value === 'object') {
+      const source = value as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const [key, raw] of Object.entries(source)) {
+        if (ConversationDatabase.SECRET_KEY_RE.test(key)) {
+          out[key] = '[REDACTED]';
+          continue;
+        }
+        if (ConversationDatabase.SENSITIVE_PAYLOAD_KEY_RE.test(key)) {
+          out[key] = '[REDACTED]';
+          continue;
+        }
+        out[key] = this.sanitizeValue(raw, key);
+      }
+      return out;
+    }
+
+    return String(value);
+  }
+
+  private redactText(value: string): string {
+    return value
+      .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[REDACTED]')
+      .replace(/\b(?:sk|pk|rk|vk)_[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]')
+      .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, '[REDACTED]')
+      .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/g, '[REDACTED]')
+      .replace(/\b[A-Za-z0-9+/]{32,}={0,2}\b/g, '[REDACTED]');
+  }
+
+  private defaultDescription(action: string): string {
+    const labels: Record<string, string> = {
+      chat: 'Processed chat turn',
+      'job.queued': 'Queued background job',
+      'job.started': 'Started background job',
+      'job.completed': 'Completed background job',
+      'job.failed': 'Background job failed',
+      'job.cancelled': 'Cancelled background job',
+      'job.interrupted': 'Background job interrupted',
+    };
+    return labels[action] ?? `Audit action: ${action}`;
   }
 
   getAuditLogs(options: {
@@ -298,6 +393,45 @@ export class ConversationDatabase {
     const result = this.db.prepare('DELETE FROM audit_log WHERE timestamp < ?').run(cutoff);
     log.info({ deleted: result.changes, daysToKeep }, 'Cleaned old audit entries');
     return result.changes;
+  }
+
+  scrubAuditLog(options: { limit?: number; dryRun?: boolean } = {}): { scanned: number; updated: number } {
+    const { dryRun = false } = options;
+    const limit = Math.max(1, Math.min(5000, options.limit ?? 1000));
+
+    const rows = this.db.prepare(`
+      SELECT id, action, details
+      FROM audit_log
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(limit) as Array<{ id: number; action: string; details: string | null }>;
+
+    let updated = 0;
+    const updateStmt = this.db.prepare('UPDATE audit_log SET details = ? WHERE id = ?');
+
+    const applyUpdates = this.db.transaction((changes: Array<{ id: number; details: string }>) => {
+      for (const change of changes) {
+        updateStmt.run(change.details, change.id);
+      }
+    });
+
+    const changes: Array<{ id: number; details: string }> = [];
+    for (const row of rows) {
+      const sanitized = this.sanitizeAuditDetails(row.action, row.details ?? undefined);
+      if ((row.details ?? '') !== sanitized) {
+        updated++;
+        if (!dryRun) {
+          changes.push({ id: row.id, details: sanitized });
+        }
+      }
+    }
+
+    if (!dryRun && changes.length > 0) {
+      applyUpdates(changes);
+    }
+
+    log.info({ scanned: rows.length, updated, dryRun, limit }, 'Audit scrub completed');
+    return { scanned: rows.length, updated };
   }
 
   close(): void {

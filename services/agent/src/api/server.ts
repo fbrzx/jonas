@@ -457,6 +457,25 @@ export function createApiServer(deps: ApiDeps) {
     });
   });
 
+  app.post('/api/audit/scrub', async (c) => {
+    if (!deps.database) {
+      return c.json({ error: 'Database not available' }, 503);
+    }
+
+    const rawBody: unknown = await c.req.json().catch(() => ({}));
+    const body = (rawBody && typeof rawBody === 'object') ? rawBody as { dryRun?: unknown; limit?: unknown } : {};
+    const dryRun = typeof body.dryRun === 'boolean' ? body.dryRun : false;
+    const limit = typeof body.limit === 'number' ? Math.max(1, Math.min(5000, body.limit)) : undefined;
+
+    const result = deps.database.scrubAuditLog({ dryRun, limit });
+    return c.json({
+      success: true,
+      dryRun,
+      limit: limit ?? 1000,
+      ...result,
+    });
+  });
+
   // --- Task scheduler endpoints ---
 
   app.get('/api/tasks', (c) => {
