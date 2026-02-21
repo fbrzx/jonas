@@ -175,8 +175,10 @@ export class BackgroundJobManager {
         }
       }
     } catch (err) {
-      // Don't update if already cancelled
-      if (job.status !== 'cancelled') {
+      // Don't update if already cancelled (cast needed: TS narrows status to
+      // 'running'|'completed' from this function's assignments, but cancel()
+      // can set it to 'cancelled' concurrently via an external call)
+      if ((job.status as JobStatus) !== 'cancelled') {
         job.status = 'failed';
         job.error = String(err).slice(0, 2000);
         job.completedAt = isoNow();
