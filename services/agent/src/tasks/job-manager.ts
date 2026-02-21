@@ -246,6 +246,7 @@ export class BackgroundJobManager {
         timestamp: isoNow(),
         action,
         details: JSON.stringify({
+          description: this.describeAction(action, job.name),
           name: job.name,
           scheduledTaskId: job.scheduledTaskId,
           promptLen: job.prompt.length,
@@ -261,6 +262,25 @@ export class BackgroundJobManager {
       });
     } catch (err) {
       log.warn({ err, action, jobId: job.id }, 'Failed to write job audit entry');
+    }
+  }
+
+  private describeAction(action: string, jobName: string): string {
+    switch (action) {
+      case 'job.queued':
+        return `Queued job "${jobName}"`;
+      case 'job.started':
+        return `Started job "${jobName}"`;
+      case 'job.completed':
+        return `Completed job "${jobName}"`;
+      case 'job.failed':
+        return `Job "${jobName}" failed`;
+      case 'job.cancelled':
+        return `Cancelled job "${jobName}"`;
+      case 'job.interrupted':
+        return `Job "${jobName}" interrupted`;
+      default:
+        return `Job event: ${action}`;
     }
   }
 

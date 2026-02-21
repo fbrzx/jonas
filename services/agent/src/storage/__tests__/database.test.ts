@@ -100,6 +100,36 @@ describe('ConversationDatabase', () => {
       expect(logs[0].durationMs).toBe(1234);
     });
 
+    it('adds a default description when details are missing', () => {
+      db.logAudit({ timestamp: '2024-01-01T00:00:00.000Z', action: 'chat' });
+
+      const [entry] = db.getAuditLogs();
+      const details = JSON.parse(entry.details ?? '{}') as Record<string, unknown>;
+      expect(details.description).toBe('Processed chat turn');
+    });
+
+    it('redacts memory payload and secrets in details', () => {
+      db.logAudit({
+        timestamp: '2024-01-01T00:00:00.000Z',
+        action: 'chat',
+        details: JSON.stringify({
+          description: 'Custom message',
+          content: 'my private memory',
+          prompt: 'remember this forever',
+          token: 'sk_live_1234567890abcdefghijklmnop',
+          authorization: 'Bearer abc.def.ghi',
+        }),
+      });
+
+      const [entry] = db.getAuditLogs();
+      const details = JSON.parse(entry.details ?? '{}') as Record<string, unknown>;
+      expect(details.description).toBe('Custom message');
+      expect(details.content).toBe('[REDACTED]');
+      expect(details.prompt).toBe('[REDACTED]');
+      expect(details.token).toBe('[REDACTED]');
+      expect(details.authorization).toBe('[REDACTED]');
+    });
+
     it('filters by action', () => {
       db.logAudit({ timestamp: '2024-01-01T00:00:00.000Z', action: 'chat' });
       db.logAudit({ timestamp: '2024-01-01T00:00:01.000Z', action: 'job.completed' });
@@ -167,6 +197,33 @@ describe('ConversationDatabase', () => {
       expect(page1).toHaveLength(2);
       expect(page2).toHaveLength(2);
       expect(page1[0].timestamp).not.toBe(page2[0].timestamp);
+    });
+
+    it('scrubs historical legacy rows in place', () => {
+      const rawDb = (db as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } } }).db;
+      rawDb.prepare(
+        'INSERT INTO audit_log (timestamp, action, details, channel_type, channel_id, session_key) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(
+        '2024-01-01T00:00:00.000Z',
+        'chat',
+        JSON.stringify({ prompt: 'secret memory text', authorization: 'Bearer abc.def.ghi' }),
+        'dashboard',
+        'web',
+        'sk_legacy',
+      );
+
+      const dryRun = db.scrubAuditLog({ dryRun: true });
+      expect(dryRun.scanned).toBeGreaterThanOrEqual(1);
+      expect(dryRun.updated).toBeGreaterThanOrEqual(1);
+
+      const applied = db.scrubAuditLog();
+      expect(applied.updated).toBeGreaterThanOrEqual(1);
+
+      const [entry] = db.getAuditLogs({ sessionKey: 'sk_legacy' });
+      const details = JSON.parse(entry.details ?? '{}') as Record<string, unknown>;
+      expect(details.description).toBe('Processed chat turn');
+      expect(details.prompt).toBe('[REDACTED]');
+      expect(details.authorization).toBe('[REDACTED]');
     });
   });
 
