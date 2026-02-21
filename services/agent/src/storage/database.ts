@@ -29,6 +29,7 @@ export interface AuditRow {
   channelType?: string;
   channelId?: string;
   sessionKey?: string;
+  jobId?: string;
   model?: string;
   tokensUsed?: number;
   durationMs?: number;
@@ -90,7 +91,26 @@ export class ConversationDatabase {
       CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_key);
       CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
     `);
+
+    // Incremental migrations — safe to run on every startup
+    this.migrate();
+
     log.info('Database schema initialized');
+  }
+
+  private migrate(): void {
+    // Add job_id column (introduced with background job manager)
+    try {
+      this.db.exec('ALTER TABLE audit_log ADD COLUMN job_id TEXT');
+      log.info('Migration: added job_id column to audit_log');
+    } catch {
+      // Column already exists — expected on subsequent startups
+    }
+    try {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_audit_job ON audit_log(job_id)');
+    } catch {
+      // Index already exists
+    }
   }
 
   saveConversation(conv: ConversationRow): void {
@@ -160,8 +180,8 @@ export class ConversationDatabase {
   // Audit log methods
   logAudit(entry: Omit<AuditRow, 'id' | 'createdAt'>): void {
     const stmt = this.db.prepare(`
-      INSERT INTO audit_log (timestamp, action, details, channel_type, channel_id, session_key, model, tokens_used, duration_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO audit_log (timestamp, action, details, channel_type, channel_id, session_key, job_id, model, tokens_used, duration_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       entry.timestamp,
@@ -170,6 +190,7 @@ export class ConversationDatabase {
       entry.channelType ?? null,
       entry.channelId ?? null,
       entry.sessionKey ?? null,
+      entry.jobId ?? null,
       entry.model ?? null,
       entry.tokensUsed ?? null,
       entry.durationMs ?? null,
@@ -183,18 +204,19 @@ export class ConversationDatabase {
     from?: string;
     to?: string;
     sessionKey?: string;
+    jobId?: string;
   } = {}): AuditRow[] {
-    const { limit = 100, offset = 0, action, from, to, sessionKey } = options;
+    const { limit = 100, offset = 0, action, from, to, sessionKey, jobId } = options;
 
     let query = `
       SELECT id, timestamp, action, details, channel_type as channelType,
-             channel_id as channelId, session_key as sessionKey, model,
-             tokens_used as tokensUsed, duration_ms as durationMs, created_at as createdAt
+             channel_id as channelId, session_key as sessionKey, job_id as jobId,
+             model, tokens_used as tokensUsed, duration_ms as durationMs, created_at as createdAt
       FROM audit_log
       WHERE 1=1
     `;
 
-    const params: any[] = [];
+    const params: unknown[] = [];
 
     if (action) {
       query += ' AND action = ?';
@@ -204,6 +226,11 @@ export class ConversationDatabase {
     if (sessionKey) {
       query += ' AND session_key = ?';
       params.push(sessionKey);
+    }
+
+    if (jobId) {
+      query += ' AND job_id = ?';
+      params.push(jobId);
     }
 
     if (from) {
@@ -227,11 +254,12 @@ export class ConversationDatabase {
     from?: string;
     to?: string;
     sessionKey?: string;
+    jobId?: string;
   } = {}): number {
-    const { action, from, to, sessionKey } = options;
+    const { action, from, to, sessionKey, jobId } = options;
 
     let query = 'SELECT COUNT(*) as count FROM audit_log WHERE 1=1';
-    const params: any[] = [];
+    const params: unknown[] = [];
 
     if (action) {
       query += ' AND action = ?';
@@ -241,6 +269,11 @@ export class ConversationDatabase {
     if (sessionKey) {
       query += ' AND session_key = ?';
       params.push(sessionKey);
+    }
+
+    if (jobId) {
+      query += ' AND job_id = ?';
+      params.push(jobId);
     }
 
     if (from) {
