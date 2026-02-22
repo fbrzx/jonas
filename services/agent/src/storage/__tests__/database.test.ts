@@ -138,6 +138,21 @@ describe('ConversationDatabase', () => {
       expect(db.getAuditLogs({ action: 'job.completed' })).toHaveLength(1);
     });
 
+    it('filters by job category (matches all job.* sub-types)', () => {
+      db.logAudit({ timestamp: '2024-01-01T00:00:00.000Z', action: 'chat' });
+      db.logAudit({ timestamp: '2024-01-01T00:00:01.000Z', action: 'job.queued' });
+      db.logAudit({ timestamp: '2024-01-01T00:00:02.000Z', action: 'job.started' });
+      db.logAudit({ timestamp: '2024-01-01T00:00:03.000Z', action: 'job.completed' });
+      db.logAudit({ timestamp: '2024-01-01T00:00:04.000Z', action: 'job.failed' });
+      db.logAudit({ timestamp: '2024-01-01T00:00:05.000Z', action: 'job.cancelled' });
+      db.logAudit({ timestamp: '2024-01-01T00:00:06.000Z', action: 'job.interrupted' });
+
+      const jobLogs = db.getAuditLogs({ action: 'job' });
+      expect(jobLogs).toHaveLength(6);
+      expect(jobLogs.every((l) => l.action.startsWith('job.'))).toBe(true);
+      expect(db.getAuditCount({ action: 'job' })).toBe(6);
+    });
+
     it('filters by jobId', () => {
       db.logAudit({ timestamp: '2024-01-01T00:00:00.000Z', action: 'job.queued', jobId: 'job_1' });
       db.logAudit({ timestamp: '2024-01-01T00:00:01.000Z', action: 'job.started', jobId: 'job_1' });
