@@ -314,8 +314,12 @@ export class ConversationDatabase {
     const params: unknown[] = [];
 
     if (action) {
-      query += ' AND action = ?';
-      params.push(action);
+      if (action === 'job') {
+        query += " AND action LIKE 'job.%'";
+      } else {
+        query += ' AND action = ?';
+        params.push(action);
+      }
     }
 
     if (sessionKey) {
@@ -357,8 +361,12 @@ export class ConversationDatabase {
     const params: unknown[] = [];
 
     if (action) {
-      query += ' AND action = ?';
-      params.push(action);
+      if (action === 'job') {
+        query += " AND action LIKE 'job.%'";
+      } else {
+        query += ' AND action = ?';
+        params.push(action);
+      }
     }
 
     if (sessionKey) {

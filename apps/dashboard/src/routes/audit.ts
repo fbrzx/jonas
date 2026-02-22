@@ -149,6 +149,7 @@ function renderFilters(currentAction: string, currentFrom: string, currentTo: st
             <option value="chat" ${currentAction === 'chat' ? 'selected' : ''}>Chat</option>
             <option value="tool_use" ${currentAction === 'tool_use' ? 'selected' : ''}>Tool Use</option>
             <option value="memory" ${currentAction === 'memory' ? 'selected' : ''}>Memory</option>
+            <option value="job" ${currentAction === 'job' ? 'selected' : ''}>Job</option>
           </select>
         </div>
 
@@ -168,7 +169,7 @@ function renderFilters(currentAction: string, currentFrom: string, currentTo: st
         </div>
       </form>
       <p class="meta" style="margin-top:0.75rem">
-        Actions: <strong>chat</strong> = conversation turn, <strong>tool_use</strong> = tool execution, <strong>memory</strong> = memory read/write.
+        Actions: <strong>chat</strong> = conversation turn, <strong>tool_use</strong> = tool execution, <strong>memory</strong> = memory read/write, <strong>job</strong> = background jobs (queued, started, completed, failed, cancelled, interrupted).
       </p>
     </div>`;
 }
