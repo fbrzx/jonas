@@ -15,7 +15,7 @@ describe('createId', () => {
   it('prepends prefix separated by underscore', () => {
     const id = createId('audit');
     expect(id.startsWith('audit_')).toBe(true);
-    expect(id.split('_')[1].length).toBe(21);
+    expect(id.length).toBe('audit_'.length + 21);
   });
 
   it('produces unique values', () => {
