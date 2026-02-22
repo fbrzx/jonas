@@ -111,7 +111,7 @@ function renderActivityNow(tasks: TaskSnapshot[], status: StatusSnapshot | null)
   return `
     <div class="card" style="margin-bottom:1rem">
       <h2>Agent Activity (Now)</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;margin-top:0.5rem">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-top:0.5rem">
         <div>
           <div class="meta">Active conversations</div>
           <strong>${status?.activeConversations ?? 0}</strong>
@@ -139,12 +139,53 @@ function renderActivityNow(tasks: TaskSnapshot[], status: StatusSnapshot | null)
 
 function renderFilters(currentAction: string, currentFrom: string, currentTo: string): string {
   return `
+    <style>
+      .audit-filters {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.75rem;
+        align-items: end;
+      }
+      
+      .audit-filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      
+      .audit-filter-group label {
+        font-size: 0.8rem;
+      }
+      
+      .audit-filter-group select,
+      .audit-filter-group input {
+        width: 100%;
+        max-width: none;
+      }
+      
+      .audit-filter-actions {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+      
+      @media (max-width: 600px) {
+        .audit-filters {
+          grid-template-columns: 1fr;
+        }
+        
+        .audit-filter-actions {
+          grid-column: 1;
+        }
+      }
+    </style>
     <div class="card" style="margin-bottom:1rem">
-      <form hx-get="/audit" hx-target="#audit-table" hx-swap="innerHTML"
-            style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;align-items:end">
-        <div style="display:flex;flex-direction:column;gap:0.25rem">
-          <label class="meta" style="font-size:0.8rem">Action</label>
-          <select name="action" style="width:100%;max-width:none">
+      <form hx-get="/audit" hx-target="#audit-table" hx-swap="innerHTML" class="audit-filters">
+        <div class="audit-filter-group">
+          <label class="meta">Action</label>
+          <select name="action">
             <option value="">All actions</option>
             <option value="chat" ${currentAction === 'chat' ? 'selected' : ''}>Chat</option>
             <option value="tool_use" ${currentAction === 'tool_use' ? 'selected' : ''}>Tool Use</option>
@@ -153,17 +194,17 @@ function renderFilters(currentAction: string, currentFrom: string, currentTo: st
           </select>
         </div>
 
-        <div style="display:flex;flex-direction:column;gap:0.25rem">
-          <label class="meta" style="font-size:0.8rem">From</label>
-          <input type="datetime-local" name="from" value="${currentFrom}" style="width:100%;max-width:none">
+        <div class="audit-filter-group">
+          <label class="meta">From</label>
+          <input type="datetime-local" name="from" value="${currentFrom}">
         </div>
 
-        <div style="display:flex;flex-direction:column;gap:0.25rem">
-          <label class="meta" style="font-size:0.8rem">To</label>
-          <input type="datetime-local" name="to" value="${currentTo}" style="width:100%;max-width:none">
+        <div class="audit-filter-group">
+          <label class="meta">To</label>
+          <input type="datetime-local" name="to" value="${currentTo}">
         </div>
 
-        <div style="display:flex;gap:0.5rem;align-items:center;justify-content:flex-start;flex-wrap:wrap">
+        <div class="audit-filter-actions">
           <button type="submit" class="btn btn--sm">Filter</button>
           <button type="button" class="btn btn--sm" onclick="window.location.href='/audit'">Clear</button>
         </div>
@@ -191,20 +232,20 @@ function renderTable(response: AuditResponse | AuditEntry[]): string {
     const status = statusLabel(e, details);
     return `
       <tr>
-        <td class="meta audit-col--timestamp" style="font-size:0.75rem">${new Date(e.timestamp).toLocaleString()}</td>
+        <td class="meta audit-col--timestamp">${new Date(e.timestamp).toLocaleString()}</td>
         <td class="audit-col--action"><span class="badge badge--blue">${e.action}</span></td>
-        <td class="meta audit-col--source" style="font-size:0.75rem">${sourceLabel(e)}</td>
-        <td class="meta audit-col--what" style="font-size:0.75rem">${summary}</td>
+        <td class="meta audit-col--source">${sourceLabel(e)}</td>
+        <td class="meta audit-col--what">${summary}</td>
         <td class="audit-col--status">${status}</td>
-        <td class="meta audit-col--model" style="font-size:0.75rem">${e.model || '-'}</td>
-        <td class="meta audit-col--duration" style="font-size:0.75rem">${e.durationMs ? e.durationMs + 'ms' : '-'}</td>
+        <td class="meta audit-col--model">${e.model || '-'}</td>
+        <td class="meta audit-col--duration">${e.durationMs ? e.durationMs + 'ms' : '-'}</td>
       </tr>`;
   }).join('');
 
   const pagination = !Array.isArray(response) ? `
-    <div style="margin-top:1rem;display:flex;justify-content:space-between;align-items:center">
+    <div class="audit-pagination">
       <p class="meta">Showing ${offset + 1}-${Math.min(offset + limit, total)} of ${total} entries</p>
-      <div style="display:flex;gap:0.5rem">
+      <div class="audit-pagination-buttons">
         ${offset > 0 ? `<button class="btn btn--sm" hx-get="/audit?offset=${Math.max(0, offset - limit)}&limit=${limit}" hx-target="#audit-table" hx-swap="innerHTML">Previous</button>` : ''}
         ${offset + limit < total ? `<button class="btn btn--sm" hx-get="/audit?offset=${offset + limit}&limit=${limit}" hx-target="#audit-table" hx-swap="innerHTML">Next</button>` : ''}
       </div>
@@ -212,13 +253,108 @@ function renderTable(response: AuditResponse | AuditEntry[]): string {
 
   return `
     <style>
-      .audit-table .audit-col--timestamp { min-width: 170px; }
-      .audit-table .audit-col--action { min-width: 110px; white-space: nowrap; }
-      .audit-table .audit-col--source { min-width: 130px; }
-      .audit-table .audit-col--what { min-width: 260px; }
-      .audit-table .audit-col--status { min-width: 110px; white-space: nowrap; }
-      .audit-table .audit-col--model { min-width: 120px; }
-      .audit-table .audit-col--duration { min-width: 90px; white-space: nowrap; }
+      /* Table base styles */
+      .audit-table {
+        font-size: 0.85rem;
+      }
+      
+      .audit-table .audit-col--timestamp { 
+        min-width: 160px;
+        font-size: 0.75rem;
+      }
+      .audit-table .audit-col--action { 
+        min-width: 100px;
+        white-space: nowrap;
+      }
+      .audit-table .audit-col--source { 
+        min-width: 110px;
+        font-size: 0.75rem;
+      }
+      .audit-table .audit-col--what { 
+        min-width: 200px;
+        font-size: 0.75rem;
+      }
+      .audit-table .audit-col--status { 
+        min-width: 100px;
+        white-space: nowrap;
+      }
+      .audit-table .audit-col--model { 
+        min-width: 100px;
+        font-size: 0.75rem;
+      }
+      .audit-table .audit-col--duration { 
+        min-width: 80px;
+        white-space: nowrap;
+        font-size: 0.75rem;
+      }
+      
+      /* Pagination styles */
+      .audit-pagination {
+        margin-top: 1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+      
+      .audit-pagination-buttons {
+        display: flex;
+        gap: 0.5rem;
+      }
+      
+      /* Mobile responsive styles */
+      @media (max-width: 768px) {
+        .audit-table {
+          font-size: 0.75rem;
+        }
+        
+        .audit-table th,
+        .audit-table td {
+          padding: 0.5rem 0.35rem;
+        }
+        
+        .audit-table .audit-col--timestamp { min-width: 140px; }
+        .audit-table .audit-col--action { min-width: 90px; }
+        .audit-table .audit-col--source { min-width: 100px; }
+        .audit-table .audit-col--what { min-width: 180px; }
+        .audit-table .audit-col--status { min-width: 90px; }
+        .audit-table .audit-col--model { min-width: 80px; }
+        .audit-table .audit-col--duration { min-width: 70px; }
+        
+        .audit-pagination {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        
+        .audit-pagination-buttons {
+          width: 100%;
+          justify-content: space-between;
+        }
+      }
+      
+      @media (max-width: 480px) {
+        .audit-table {
+          font-size: 0.7rem;
+        }
+        
+        .audit-table th,
+        .audit-table td {
+          padding: 0.4rem 0.25rem;
+        }
+        
+        /* Hide less critical columns on very small screens */
+        .audit-table .audit-col--model,
+        .audit-table .audit-col--duration {
+          display: none;
+        }
+        
+        .audit-table .audit-col--timestamp { min-width: 120px; }
+        .audit-table .audit-col--action { min-width: 80px; }
+        .audit-table .audit-col--source { min-width: 90px; }
+        .audit-table .audit-col--what { min-width: 150px; }
+        .audit-table .audit-col--status { min-width: 80px; }
+      }
     </style>
     <div class="table-scroll">
       <table class="audit-table">
@@ -229,8 +365,8 @@ function renderTable(response: AuditResponse | AuditEntry[]): string {
             <th>Source</th>
             <th>What</th>
             <th>Status</th>
-            <th>Model</th>
-            <th>Duration</th>
+            <th class="audit-col--model">Model</th>
+            <th class="audit-col--duration">Duration</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
