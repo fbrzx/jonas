@@ -441,13 +441,15 @@ export function createApiServer(deps: ApiDeps) {
 
     const limit = Number(c.req.query('limit') ?? 100);
     const offset = Number(c.req.query('offset') ?? 0);
+
     const action = c.req.query('action') || undefined;
+    const logType = c.req.query('logType') || undefined;
     const from = c.req.query('from') || undefined;
     const to = c.req.query('to') || undefined;
     const sessionKey = c.req.query('sessionKey') || undefined;
 
-    const logs = deps.database.getAuditLogs({ limit, offset, action, from, to, sessionKey });
-    const total = deps.database.getAuditCount({ action, from, to, sessionKey });
+    const logs = deps.database.getAuditLogs({ limit, offset, action, logType, from, to, sessionKey });
+    const total = deps.database.getAuditCount({ action, logType, from, to, sessionKey });
 
     return c.json({
       logs,

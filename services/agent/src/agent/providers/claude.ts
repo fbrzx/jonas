@@ -68,7 +68,7 @@ export class ClaudeProvider implements ModelProvider {
 
       child.on('close', (code) => {
         opts.signal.removeEventListener('abort', onAbort);
-        log.info({ code, stdoutLen: stdout.length, stderrLen: stderr.length }, 'Claude CLI process exited');
+        log.warn({ code, stdoutLen: stdout.length, stderrLen: stderr.length }, 'Claude CLI process exited');
 
         try {
           const result: CliResult = JSON.parse(stdout);

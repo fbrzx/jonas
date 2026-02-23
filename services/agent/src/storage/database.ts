@@ -25,6 +25,7 @@ export interface AuditRow {
   id?: number;
   timestamp: string;
   action: string;
+  logType?: 'info' | 'debug' | 'warn' | 'error';
   details?: string;
   channelType?: string;
   channelId?: string;
@@ -79,6 +80,7 @@ export class ConversationDatabase {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp TEXT NOT NULL,
         action TEXT NOT NULL,
+        log_type TEXT,
         details TEXT,
         channel_type TEXT,
         channel_id TEXT,
@@ -88,7 +90,6 @@ export class ConversationDatabase {
         duration_ms INTEGER,
         created_at TEXT DEFAULT (datetime('now'))
       );
-
       CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
       CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
       CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_key);
@@ -185,20 +186,22 @@ export class ConversationDatabase {
     const sanitizedDetails = this.sanitizeAuditDetails(entry.action, entry.details);
 
     const stmt = this.db.prepare(`
-      INSERT INTO audit_log (timestamp, action, details, channel_type, channel_id, session_key, job_id, model, tokens_used, duration_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO audit_log (timestamp, action, log_type, details, channel_type, channel_id, session_key, model, tokens_used, duration_ms, job_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       entry.timestamp,
       entry.action,
+      entry.logType ?? null,
       sanitizedDetails ?? null,
       entry.channelType ?? null,
       entry.channelId ?? null,
       entry.sessionKey ?? null,
-      entry.jobId ?? null,
       entry.model ?? null,
       entry.tokensUsed ?? null,
       entry.durationMs ?? null,
+      entry.jobId ?? null,
+      new Date().toISOString(),
     );
   }
 
@@ -296,22 +299,26 @@ export class ConversationDatabase {
     limit?: number;
     offset?: number;
     action?: string;
+    logType?: string;
     from?: string;
     to?: string;
     sessionKey?: string;
     jobId?: string;
   } = {}): AuditRow[] {
-    const { limit = 100, offset = 0, action, from, to, sessionKey, jobId } = options;
+    const { limit = 100, offset = 0, action, logType, from, to, sessionKey, jobId } = options;
 
     let query = `
-      SELECT id, timestamp, action, details, channel_type as channelType,
-             channel_id as channelId, session_key as sessionKey, job_id as jobId,
-             model, tokens_used as tokensUsed, duration_ms as durationMs, created_at as createdAt
-      FROM audit_log
-      WHERE 1=1
+            SELECT id, timestamp, action, log_type as logType, details, channel_type as channelType,
+              channel_id as channelId, session_key as sessionKey, job_id as jobId,
+              model, tokens_used as tokensUsed, duration_ms as durationMs, created_at as createdAt
+            FROM audit_log
+            WHERE 1=1
     `;
-
     const params: unknown[] = [];
+    if (logType) {
+      query += ' AND log_type = ?';
+      params.push(logType);
+    }
 
     if (action) {
       if (action === 'job') {
@@ -350,15 +357,21 @@ export class ConversationDatabase {
 
   getAuditCount(options: {
     action?: string;
+    logType?: string;
     from?: string;
     to?: string;
     sessionKey?: string;
     jobId?: string;
   } = {}): number {
-    const { action, from, to, sessionKey, jobId } = options;
+    const { action, logType, from, to, sessionKey, jobId } = options;
 
     let query = 'SELECT COUNT(*) as count FROM audit_log WHERE 1=1';
+    
     const params: unknown[] = [];
+    if (logType) {
+      query += ' AND log_type = ?';
+      params.push(logType);
+    }
 
     if (action) {
       if (action === 'job') {

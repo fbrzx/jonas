@@ -18,6 +18,7 @@ export interface AuditEntry {
   id: string;
   timestamp: string;
   action: string;
+  logType?: 'info' | 'debug' | 'warn' | 'error';
   tool?: string;
   input?: Record<string, unknown>;
   result?: 'success' | 'error';

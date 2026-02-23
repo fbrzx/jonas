@@ -91,11 +91,13 @@ export class AgentCore {
     details?: Record<string, unknown>;
     model?: string;
     durationMs?: number;
+    logType?: 'info' | 'debug' | 'warn' | 'error';
   }): void {
     const entry: AuditEntry = {
       id: createId('audit'),
       timestamp: isoNow(),
       action: params.action,
+      logType: params.logType ?? (params.action === 'tool_use' ? 'info' : 'info'),
       channel: params.channel.type,
       conversationId: params.conversationId,
     };
@@ -110,6 +112,7 @@ export class AgentCore {
     this.database.logAudit({
       timestamp: entry.timestamp,
       action: params.action,
+      logType: entry.logType,
       details: params.details ? JSON.stringify(params.details) : undefined,
       channelType: params.channel.type,
       channelId: params.channel.id,
@@ -143,7 +146,7 @@ export class AgentCore {
           conversationId: m.conversationId,
           timestamp: m.timestamp,
         }));
-        log.info({ sessionKey: key, messageCount: session.messages.length }, 'Loaded conversation from database');
+        log.debug({ sessionKey: key, messageCount: session.messages.length }, 'Loaded conversation from database');
       }
     }
 
@@ -176,7 +179,7 @@ export class AgentCore {
     const executedToolNames = new Set<string>();
 
     try {
-      log.info({ channel: channel.type, sessionKey: key, historyLen: session.messages.length }, 'Sending query to model provider');
+      log.info({ channel: channel.type, channelId: channel.id, sessionKey: key, historyLen: session.messages.length, userMessage: userMessage.slice(0, 80) }, 'Sending query to model provider');
 
       const providerMessages: ProviderMessage[] = [
         { role: 'system', content: systemPrompt },
@@ -251,6 +254,7 @@ export class AgentCore {
             channel,
             sessionKey: key,
             conversationId: session.id,
+            logType: typeof toolResult.error === 'string' ? 'error' : 'info',
             details: {
               description: `Executed ${action === 'memory' ? 'memory' : 'tool'}: ${call.name}`,
               tool: call.name,
@@ -294,7 +298,7 @@ export class AgentCore {
 
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') {
-        log.info({ sessionKey: key }, 'Query aborted');
+        log.debug({ sessionKey: key }, 'Query aborted');
         fullResponse = this.renderErrorMessage({
           userMessage: 'Your request was aborted. If this was not intentional, please try again. If the problem persists, contact the operator.',
           technical: 'AbortError thrown during model/tool execution.'
@@ -364,6 +368,7 @@ export class AgentCore {
       channel,
       sessionKey: key,
       conversationId: session.id,
+      logType: 'info',
       details: {
         description: 'Processed chat turn',
         conversationId: session.id,
@@ -376,7 +381,7 @@ export class AgentCore {
 
     if (session.messages.length > 20) {
       session.messages = session.messages.slice(-10);
-      log.info({ sessionKey: key }, 'Compacted conversation history');
+      log.debug({ sessionKey: key }, 'Compacted conversation history');
     }
 
     return fullResponse;

@@ -49,7 +49,7 @@ export class BackgroundJobManager {
     }
     this.jobs = persisted;
     await this.persist();
-    log.info({ count: this.jobs.length }, 'Job manager started');
+    log.debug({ count: this.jobs.length }, 'Job manager started');
   }
 
   /**
@@ -79,7 +79,7 @@ export class BackgroundJobManager {
     await this.persist();
 
     this.auditLog('job.queued', job);
-    log.info({ id: job.id, name: job.name, activeCount: this.activeCount }, 'Job queued');
+    log.debug({ id: job.id, name: job.name, activeCount: this.activeCount }, 'Job queued');
 
     if (this.activeCount < MAX_CONCURRENT_JOBS) {
       this.runJob(job).catch((err) => {
@@ -87,7 +87,7 @@ export class BackgroundJobManager {
       });
     } else {
       this.queue.push(job);
-      log.info({ id: job.id, queueLength: this.queue.length }, 'Job queued — at concurrency limit');
+      log.debug({ id: job.id, queueLength: this.queue.length }, 'Job queued — at concurrency limit');
     }
 
     return job;
@@ -114,7 +114,7 @@ export class BackgroundJobManager {
     await this.persist();
 
     this.auditLog('job.cancelled', job);
-    log.info({ id }, 'Job cancelled');
+    log.debug({ id }, 'Job cancelled');
     return true;
   }
 
@@ -139,7 +139,7 @@ export class BackgroundJobManager {
     await this.persist();
 
     this.auditLog('job.started', job);
-    log.info({ id: job.id, name: job.name, activeCount: this.activeCount }, 'Sub-agent job starting');
+    log.info({ id: job.id, name: job.name, activeCount: this.activeCount, prompt: job.prompt.slice(0, 80) }, 'Sub-agent job starting');
 
     const timeoutMs = job.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     let timeoutHandle: NodeJS.Timeout | undefined;

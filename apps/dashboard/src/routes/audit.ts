@@ -9,6 +9,7 @@ interface AuditEntry {
   id?: number;
   timestamp: string;
   action: string;
+  logType?: 'info' | 'debug' | 'warn' | 'error';
   details?: string;
   channelType?: string;
   channelId?: string;
@@ -137,7 +138,7 @@ function renderActivityNow(tasks: TaskSnapshot[], status: StatusSnapshot | null)
     </div>`;
 }
 
-function renderFilters(currentAction: string, currentFrom: string, currentTo: string): string {
+function renderFilters(currentAction: string, currentFrom: string, currentTo: string, currentLogType: string): string {
   return `
     <style>
       .audit-filters {
@@ -191,6 +192,17 @@ function renderFilters(currentAction: string, currentFrom: string, currentTo: st
             <option value="tool_use" ${currentAction === 'tool_use' ? 'selected' : ''}>Tool Use</option>
             <option value="memory" ${currentAction === 'memory' ? 'selected' : ''}>Memory</option>
             <option value="job" ${currentAction === 'job' ? 'selected' : ''}>Job</option>
+          </select>
+        </div>
+
+        <div class="audit-filter-group">
+          <label class="meta">Log Type</label>
+          <select name="logType">
+            <option value="">All types</option>
+            <option value="info" ${currentLogType === 'info' ? 'selected' : ''}>Info</option>
+            <option value="debug" ${currentLogType === 'debug' ? 'selected' : ''}>Debug</option>
+            <option value="warn" ${currentLogType === 'warn' ? 'selected' : ''}>Warn</option>
+            <option value="error" ${currentLogType === 'error' ? 'selected' : ''}>Error</option>
           </select>
         </div>
 
@@ -375,9 +387,11 @@ function renderTable(response: AuditResponse | AuditEntry[]): string {
     ${pagination}`;
 }
 
+
 app.get('/audit', async (c) => {
   const isHtmx = c.req.header('HX-Request') === 'true';
   const action = c.req.query('action') || '';
+  const logType = c.req.query('logType') || '';
   const from = c.req.query('from') || '';
   const to = c.req.query('to') || '';
   const offset = c.req.query('offset') || '0';
@@ -386,6 +400,7 @@ app.get('/audit', async (c) => {
   try {
     const params = new URLSearchParams();
     if (action) params.set('action', action);
+    if (logType) params.set('logType', logType);
     if (from) params.set('from', new Date(from).toISOString());
     if (to) params.set('to', new Date(to).toISOString());
     params.set('offset', offset);
@@ -413,7 +428,7 @@ app.get('/audit', async (c) => {
         'Audit',
         `<h1>Audit Log</h1>
         ${nowHtml}
-        ${renderFilters(action, from, to)}
+        ${renderFilters(action, from, to, logType)}
         <div id="audit-table">
           ${tableHtml}
         </div>`
@@ -427,7 +442,7 @@ app.get('/audit', async (c) => {
         'Audit',
         `<h1>Audit Log</h1>
         ${renderActivityNow([], null)}
-        ${renderFilters(action, from, to)}
+        ${renderFilters(action, from, to, logType)}
         <div id="audit-table">
           ${errorHtml}
         </div>`

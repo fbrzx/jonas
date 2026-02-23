@@ -145,7 +145,7 @@ export class OllamaProvider implements ModelProvider {
 
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') {
-        log.info('Ollama query aborted');
+        log.error('Ollama query aborted');
         throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
       }
 
@@ -240,7 +240,7 @@ export class OllamaProvider implements ModelProvider {
     for (const candidate of candidates) {
       const parsed = this.tryParseToolCallCandidate(candidate);
       if (parsed.length > 0) {
-        log.info({ toolCalls: parsed.length }, 'Parsed tool calls from text fallback');
+        log.debug({ toolCalls: parsed.length }, 'Parsed tool calls from text fallback');
         return parsed;
       }
     }
