@@ -1,5 +1,6 @@
 import { readdir, readFile, writeFile, rm, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { existsSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import AdmZip from 'adm-zip';
@@ -316,7 +317,8 @@ export class ChannelRegistry {
     if (existsSync(jsHandlerPath)) {
       log.info({ channel: channel.dirName }, 'Loading JavaScript handler');
 
-      const module = await import(jsHandlerPath);
+      const moduleUrl = `${pathToFileURL(jsHandlerPath).href}?t=${Date.now()}`;
+      const module = await import(moduleUrl);
       if (!module.initialize) {
         throw new Error('Handler must export initialize function');
       }
