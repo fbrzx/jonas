@@ -96,9 +96,16 @@ Per-skill API keys are stored encrypted and injected as env vars into the tool s
 export function assembleSystemPrompt(
   memories: MemorySearchResult[],
   skillPrompts?: string[],
-  options?: { providerName?: string },
+  options?: { providerName?: string; channel?: { type: string; id: string } },
 ): string {
   const parts = [BASE_PROMPT];
+
+  if (options?.channel) {
+    const channelType = options.channel.type.replace(/^channel:/, '');
+    parts.push(`\n## Current Session\n`);
+    parts.push(`You are responding via channel: **${channelType}** (ID: \`${options.channel.id}\`)`);
+    parts.push(`Background jobs spawned via job_run will automatically deliver results back to this channel unless you explicitly override targetChannelType/targetChannelId.`);
+  }
 
   if (memories.length > 0) {
     parts.push('\n## Relevant Memories\n');

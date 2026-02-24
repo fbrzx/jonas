@@ -579,9 +579,12 @@ export function createApiServer(deps: ApiDeps) {
   app.delete('/api/jobs/:id', async (c) => {
     if (!deps.jobManager) return c.json({ error: 'Job manager not available' }, 503);
     const id = c.req.param('id');
+    // Try cancel first (running/queued jobs), then dismiss (terminal jobs)
     const cancelled = await deps.jobManager.cancel(id);
-    if (!cancelled) return c.json({ error: 'Job not found or already in terminal state' }, 404);
-    return c.json({ success: true });
+    if (cancelled) return c.json({ success: true, action: 'cancelled' });
+    const dismissed = await deps.jobManager.dismiss(id);
+    if (dismissed) return c.json({ success: true, action: 'dismissed' });
+    return c.json({ error: 'Job not found' }, 404);
   });
 
   // --- Skill endpoints ---

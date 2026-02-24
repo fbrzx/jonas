@@ -165,7 +165,9 @@ async function main() {
   // Shared output dispatcher — sends task/job results to channels
   const dispatchOutput = async (channel: { type: string; id: string }, text: string): Promise<void> => {
     try {
-      await channelRegistry.sendMessage(channel.type, channel.id, text);
+      // Normalize: strip 'channel:' prefix so registry lookup works (handlers keyed by dirName)
+      const channelName = channel.type.replace(/^channel:/, '');
+      await channelRegistry.sendMessage(channelName, channel.id, text);
     } catch {
       log.info({ channel, textLen: text.length }, 'Task/job output (channel delivery failed or not configured)');
     }
