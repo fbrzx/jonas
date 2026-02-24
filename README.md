@@ -1,6 +1,6 @@
 # Jonas — Personal AI Assistant
 
-Always-on personal AI assistant running in Docker. Supports both Claude (via CLI) and Ollama (local models), stores memories in Qdrant, uses configurable skills and performs scheduled tasks.
+Always-on personal AI assistant running in Docker. Supports both Claude (via OAuth) and Ollama (local models), stores memories in Qdrant, communicates via installable channels (Telegram, Slack, Discord, etc.), uses configurable skills, and performs scheduled tasks.
 
 ## Quick Start
 
@@ -44,14 +44,13 @@ docker compose up -d ollama
 docker compose exec ollama ollama pull qwen2.5-coder:latest
 ```
 
-You can also configure the model provider via the dashboard UI at runtime. See `.claude/docs/environment-variables.md` for all configuration options.
+You can also configure the model provider via the dashboard UI (`/model`). Changes require an agent restart to take effect. See `.claude/docs/environment-variables.md` for all configuration options.
 
 ## Access
 
 - **Terminal CLI**: `jonas-acp --url wss://your.domain:18789 --token <token>` (see `.claude/docs/gateway-cli-usage.md`)
 - **Claude Desktop**: Configure MCP bridge in `claude_desktop_config.json` (see `.claude/docs/claude-desktop-integration.md`)
 - **Dashboard**: `ssh -L 3000:127.0.0.1:3000 user@your.domain` then `http://localhost:3000`
-- **Obsidian Vault**: `sshfs user@your.domain:/path/to/vault ~/Jonas-Vault`
 
 ## Development
 
