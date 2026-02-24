@@ -1,7 +1,10 @@
-const NAV_ITEMS = [
+const NAV_PINNED = [
   { href: '/chat', label: 'Chat' },
-  { href: '/memory', label: 'Memory' },
-  { href: '/ext', label: 'Plugins' },
+];
+
+const NAV_ITEMS = [
+  { href: '/skills', label: 'Skills' },
+  { href: '/channels', label: 'Channels' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/audit', label: 'Audit' },
 ];
@@ -27,10 +30,13 @@ function getEnvironmentClass(domain: string): string {
 }
 
 export function layout(title: string, content: string): string {
+  const pinnedNav = NAV_PINNED.map(
+    (item) => `<a class="nav-link-pinned" href="${item.href}">${item.label}</a>`
+  ).join('');
   const nav = NAV_ITEMS.map(
     (item) => `<a href="${item.href}">${item.label}</a>`
   ).join('');
-  const mobileNav = NAV_ITEMS.map(
+  const mobileNav = [...NAV_PINNED, ...NAV_ITEMS].map(
     (item) => `<a href="${item.href}" class="mobile-nav__link">${item.label}</a>`
   ).join('');
   
@@ -85,6 +91,12 @@ export function layout(title: string, content: string): string {
       border: 1px solid #30363d; background: #0d1117;
       image-rendering: pixelated;
     }
+    .nav-link-pinned {
+      color: #58a6ff; text-decoration: none; font-size: 0.875rem;
+      padding: 0.25rem 0.5rem; border-radius: 4px;
+      transition: background 0.15s; white-space: nowrap;
+    }
+    .nav-link-pinned:hover { background: #1f2937; }
     .nav-links { display: flex; gap: 1.5rem; align-items: center; }
     .nav-right { display: flex; align-items: center; gap: 0.75rem; }
     .nav-menu-btn {
@@ -342,6 +354,7 @@ export function layout(title: string, content: string): string {
         <img class="brand-icon" src="${jonasIconUrl}" alt="Jonas icon">
         <span>Jonas</span>
       </a>
+      ${pinnedNav}
       <div class="nav-links">${nav}</div>
     </div>
     <div class="nav-right">

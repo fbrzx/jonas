@@ -260,7 +260,7 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
     </div>` : '';
 
   return `
-    <p><a href="/ext">&larr; Back to Plugins</a></p>
+    <p><a href="/channels">&larr; Back to Channels</a></p>
     <h1>${channel.metadata.name}</h1>
     <p class="meta" style="margin-bottom:1.5rem">${channel.metadata.description}</p>
 
@@ -336,7 +336,56 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
 
 // --- Routes ---
 
-app.get('/channels', (c) => c.redirect('/ext'));
+function redirectToChannels(status: 'success' | 'error', message: string): Response {
+  const params = new URLSearchParams({ importStatus: status, importMessage: message });
+  return new Response(null, { status: 302, headers: { Location: `/channels?${params}` } });
+}
+
+app.get('/channels', async (c) => {
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/channels`);
+    const channels = (await res.json()) as PlatformChannel[];
+    const importStatus = c.req.query('importStatus') ?? null;
+    const importMessage = c.req.query('importMessage') ?? null;
+
+    const messageHtml = importMessage
+      ? `<p class="badge ${importStatus === 'success' ? 'badge--green' : 'badge--red'}" style="margin-bottom:0.75rem">${importMessage}</p>`
+      : '';
+
+    const rows = channels.length
+      ? channels.map(renderChannelRow).join('')
+      : '<tr><td colspan="6" class="meta" style="padding:1rem">No channels installed.</td></tr>';
+
+    return c.html(layout('Channels', `
+      <h1>Channels</h1>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Name</th><th>Platform</th><th>Mode</th><th>Status</th><th>State</th><th>Actions</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Import Channel</h2>
+        <p class="meta" style="margin-bottom:0.75rem">Upload a .zip channel package.</p>
+        ${messageHtml}
+        <form action="/channels/import" method="post" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
+          <input type="file" name="file" accept=".zip" required
+            style="width:100%;max-width:420px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;padding:0.35rem;font-family:inherit;font-size:0.875rem">
+          <label style="display:flex;align-items:center;gap:0.5rem">
+            <input type="checkbox" name="overwrite" value="true">
+            <span class="meta">Overwrite if already exists</span>
+          </label>
+          <button type="submit" class="btn btn--sm" style="align-self:flex-start">Import</button>
+        </form>
+      </div>
+    `));
+  } catch {
+    return c.html(layout('Channels', '<h1>Channels</h1><p class="badge badge--red">Agent unreachable</p>'));
+  }
+});
 
 app.get('/channels/:name', async (c) => {
   const name = c.req.param('name');
@@ -348,7 +397,7 @@ app.get('/channels/:name', async (c) => {
     ]);
 
     if (!channel) {
-      return c.html(layout('Channel Not Found', '<h1>Channel Not Found</h1><p><a href="/ext">&larr; Back to Plugins</a></p>'));
+      return c.html(layout('Channel Not Found', '<h1>Channel Not Found</h1><p><a href="/channels">&larr; Back to Channels</a></p>'));
     }
     return c.html(layout(channel.metadata.name, renderChannelDetail(channel, pairing, pairingMessage)));
   } catch {
@@ -487,29 +536,34 @@ app.get('/channels/:name/export', async (c) => {
 });
 
 app.post('/channels/import', async (c) => {
-  const body = await c.req.parseBody();
-  const file = body.file;
-  const overwrite = body.overwrite === 'true';
+  try {
+    const body = await c.req.parseBody();
+    const file = body.file;
+    const overwrite = body.overwrite === 'true';
 
-  if (!file || typeof file === 'string') {
-    return c.html(layout('Import Failed', '<h1>Import Failed</h1><p class="badge badge--red">No file uploaded</p><p><a href="/ext">&larr; Back to Plugins</a></p>'));
+    if (!file || typeof file === 'string') {
+      return redirectToChannels('error', 'No file uploaded');
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('overwrite', overwrite.toString());
+
+    const res = await fetch(`${AGENT_URL()}/api/channels/import`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const error = (await res.json()) as { error?: string };
+      return redirectToChannels('error', error.error ?? 'Import failed');
+    }
+
+    return redirectToChannels('success', 'Channel imported successfully');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Agent unreachable';
+    return redirectToChannels('error', message);
   }
-
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('overwrite', overwrite.toString());
-
-  const res = await fetch(`${AGENT_URL()}/api/channels/import`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const error = (await res.json()) as { error?: string };
-    return c.html(layout('Import Failed', `<h1>Import Failed</h1><p class="badge badge--red">${error.error}</p><p><a href="/ext">&larr; Back to Plugins</a></p>`));
-  }
-
-  return c.redirect('/channels');
 });
 
 // --- Channel OAuth setup (inline credentials form) ---
