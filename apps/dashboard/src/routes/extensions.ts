@@ -1,25 +1,13 @@
 import { Hono } from 'hono';
 import AdmZip from 'adm-zip';
-import type { Connection, PlatformChannel, Skill } from '@jonas/shared/types';
+import type { PlatformChannel, Skill } from '@jonas/shared/types';
 import { layout } from '../views/layout.js';
 
 const app = new Hono();
 const AGENT_URL = () => process.env.AGENT_API_URL ?? 'http://localhost:3001';
 const PAGE_SIZE = 7;
 type ExtensionType = 'skill' | 'channel';
-type ExtFilterType = 'all' | 'skill' | 'channel' | 'connection';
-
-type ConnectionsResponse = Connection[] | { skillConnections: Connection[]; connectionStatus: unknown[] };
-
-interface ExtensionConnection {
-  entityType: 'skill' | 'channel';
-  entityId: string;
-  entityName: string;
-  secretKey: string;
-  provider: string;
-  connected: boolean;
-  scopes: string[];
-}
+type ExtFilterType = 'all' | ExtensionType;
 
 interface PaginationResult<T> {
   items: T[];
@@ -135,11 +123,6 @@ function renderImportForm(importStatus: string | null, importMessage: string | n
     </div>`;
 }
 
-function parseConnections(raw: ConnectionsResponse): Connection[] {
-  if (Array.isArray(raw)) return raw;
-  return raw.skillConnections ?? [];
-}
-
 function parsePage(value: string | null): number {
   const parsed = Number.parseInt(value ?? '1', 10);
   if (!Number.isFinite(parsed) || parsed < 1) return 1;
@@ -190,39 +173,6 @@ function renderPager(
     </div>`;
 }
 
-function parseExtFilter(value: string | null): ExtFilterType {
-  if (value === 'skill' || value === 'channel' || value === 'connection') return value;
-  return 'all';
-}
-
-function renderTypeFilter(current: ExtFilterType, params: URLSearchParams): string {
-  const options: ExtFilterType[] = ['all', 'skill', 'channel', 'connection'];
-  const labels: Record<ExtFilterType, string> = {
-    all: 'All',
-    skill: 'Skills',
-    channel: 'Channels',
-    connection: 'Connections',
-  };
-
-  const links = options.map((option) => {
-    const next = new URLSearchParams(params);
-    next.set('extType', option);
-    next.set('page', '1');
-    const cls = option === current ? 'btn btn--sm btn--primary' : 'btn btn--sm';
-    return `<a class="${cls}" href="/ext?${next.toString()}" style="text-decoration:none">${labels[option]}</a>`;
-  }).join('');
-
-  return `
-    <div class="card" style="margin-bottom:1rem">
-      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 0.75rem;align-items:start">
-        <span class="meta" style="padding-top:0.3rem">Type:</span>
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
-          ${links}
-        </div>
-      </div>
-    </div>`;
-}
-
 function renderUnifiedExtensionsTable(rows: UnifiedExtensionRow[]): string {
   if (rows.length === 0) {
     return '<p class="meta">No matching plugins found.</p>';
@@ -258,58 +208,48 @@ function renderUnifiedExtensionsTable(rows: UnifiedExtensionRow[]): string {
     </div>`;
 }
 
-function collectChannelConnections(channels: PlatformChannel[]): ExtensionConnection[] {
-  const result: ExtensionConnection[] = [];
+function parseExtFilter(value: string | null): ExtFilterType {
+  if (value === 'skill' || value === 'channel') return value;
+  return 'all';
+}
 
-  for (const channel of channels) {
-    const oauthConfig = channel.config?.oauth ?? {};
-    const secretKeys = channel.secretKeys ?? [];
+function renderTypeFilter(current: ExtFilterType, params: URLSearchParams): string {
+  const options: { value: ExtFilterType; label: string }[] = [
+    { value: 'all', label: 'All' },
+    { value: 'skill', label: 'Skills' },
+    { value: 'channel', label: 'Channels' },
+  ];
 
-    for (const [key, flow] of Object.entries(oauthConfig)) {
-      result.push({
-        entityType: 'channel',
-        entityId: channel.dirName,
-        entityName: channel.metadata.name,
-        secretKey: key,
-        provider: flow.provider,
-        connected: secretKeys.includes(key),
-        scopes: flow.scopes,
-      });
-    }
-  }
+  const links = options.map(({ value, label }) => {
+    const next = new URLSearchParams(params);
+    next.set('extType', value);
+    next.set('page', '1');
+    const cls = value === current ? 'btn btn--sm btn--primary' : 'btn btn--sm';
+    return `<a class="${cls}" href="/ext?${next.toString()}" style="text-decoration:none">${label}</a>`;
+  }).join('');
 
-  return result;
+  return `
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:0.5rem 0.75rem;align-items:start">
+        <span class="meta" style="padding-top:0.3rem">Type:</span>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
+          ${links}
+        </div>
+      </div>
+    </div>`;
 }
 
 app.get('/ext', async (c) => {
   try {
-    const [skillsRes, channelsRes, connectionsRes] = await Promise.all([
+    const [skillsRes, channelsRes] = await Promise.all([
       fetch(`${AGENT_URL()}/api/skills`),
       fetch(`${AGENT_URL()}/api/channels`),
-      fetch(`${AGENT_URL()}/api/connections`),
     ]);
 
     const [skills, channels] = await Promise.all([
       skillsRes.json() as Promise<Skill[]>,
       channelsRes.json() as Promise<PlatformChannel[]>,
     ]);
-
-    const skillConnections = connectionsRes.ok
-      ? parseConnections((await connectionsRes.json()) as ConnectionsResponse)
-      : [];
-
-    const allConnections: ExtensionConnection[] = [
-      ...skillConnections.map((conn) => ({
-        entityType: 'skill' as const,
-        entityId: conn.skillDirName,
-        entityName: conn.skillName,
-        secretKey: conn.secretKey,
-        provider: conn.provider,
-        connected: conn.connected,
-        scopes: conn.scopes,
-      })),
-      ...collectChannelConnections(channels),
-    ];
 
     const url = new URL(c.req.url);
     const searchParams = new URLSearchParams(url.searchParams);
@@ -365,23 +305,7 @@ app.get('/ext', async (c) => {
       };
     });
 
-    const connectionRows: UnifiedExtensionRow[] = allConnections.map((conn) => {
-      const targetHref = conn.entityType === 'skill'
-        ? `/skills/${encodeURIComponent(conn.entityId)}`
-        : `/channels/${encodeURIComponent(conn.entityId)}`;
-      const details = `<code>${conn.provider}</code><br><span class="meta">${conn.entityType}: ${conn.entityName}</span>`;
-      const status = `<span class="badge ${conn.connected ? 'badge--green' : 'badge--red'}">${conn.connected ? 'connected' : 'not connected'}</span>`;
-      const actions = `<a class="btn btn--sm" href="${targetHref}">Manage</a><a class="btn btn--sm" href="/ext/export/${encodeURIComponent(conn.entityType)}/${encodeURIComponent(conn.entityId)}">Export</a>`;
-      return {
-        type: 'connection',
-        name: `<a href="${targetHref}"><strong>${conn.entityName}</strong></a>`,
-        details,
-        status,
-        actions,
-      };
-    });
-
-    const unifiedRows = [...skillRows, ...channelRows, ...connectionRows];
+    const unifiedRows = [...skillRows, ...channelRows];
     const filteredRows = extType === 'all' ? unifiedRows : unifiedRows.filter((row) => row.type === extType);
     const pagedRows = paginate(filteredRows, parsePage(url.searchParams.get('page')));
 
