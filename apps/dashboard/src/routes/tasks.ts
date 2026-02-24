@@ -4,6 +4,12 @@ import { layout } from '../views/layout.js';
 const app = new Hono();
 
 const AGENT_URL = () => process.env.AGENT_API_URL ?? 'http://localhost:3001';
+const AGENT_TOKEN = () => (process.env.AGENT_API_TOKEN ?? '').trim();
+
+function agentHeaders(): Record<string, string> {
+  const token = AGENT_TOKEN();
+  return token ? { 'x-agent-token': token } : {};
+}
 
 interface Task {
   id: string;
@@ -18,6 +24,20 @@ interface Task {
   runCount?: number;
   status: 'pending' | 'running' | 'completed' | 'failed';
   lastResult?: string;
+}
+
+interface Job {
+  id: string;
+  name: string;
+  prompt: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  result?: string;
+  error?: string;
+  targetChannel?: { type: string; id: string };
+  scheduledTaskId?: string;
 }
 
 function escAttr(value: string): string {
@@ -47,6 +67,97 @@ function formatResult(raw: string): string {
   } catch {
     return raw;
   }
+}
+
+function renderJobRow(job: Job): string {
+  const isTerminal = job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled';
+  const isRunning = job.status === 'running' || job.status === 'queued';
+
+  const statusBadge = {
+    queued: '<span class="badge">⏳ Queued</span>',
+    running: '<span class="badge badge--blue">▶ Running</span>',
+    completed: '<span class="badge badge--green">✓ Done</span>',
+    failed: '<span class="badge badge--red">✗ Failed</span>',
+    cancelled: '<span class="badge">⊘ Cancelled</span>',
+  }[job.status] ?? '<span class="badge">?</span>';
+
+  const target = job.targetChannel ? `${job.targetChannel.type}` : '—';
+  const created = new Date(job.createdAt).toLocaleString();
+  const duration = (() => {
+    if (!job.startedAt) return '';
+    const end = job.completedAt ? new Date(job.completedAt) : new Date();
+    const secs = Math.round((end.getTime() - new Date(job.startedAt).getTime()) / 1000);
+    return secs < 60 ? `${secs}s` : `${Math.round(secs / 60)}m ${secs % 60}s`;
+  })();
+
+  const resultRow = (job.result || job.error) ? `
+    <tr id="job-result-${job.id}" hidden>
+      <td colspan="5">
+        <div class="card" style="margin:0.5rem 0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+            <span class="meta">${job.error ? 'Error' : 'Result'}</span>
+            <button class="btn btn--sm" style="font-size:0.65rem;padding:0.15rem 0.4rem"
+              onclick="document.getElementById('job-result-${job.id}').toggleAttribute('hidden')">Close</button>
+          </div>
+          <pre style="font-size:0.8rem;padding:0.75rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;overflow-x:auto;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"><code>${escAttr(job.error ?? job.result ?? '')}</code></pre>
+        </div>
+      </td>
+    </tr>` : '';
+
+  return `
+    <tr id="job-row-${job.id}"
+      ${isRunning ? `hx-get="/tasks/jobs/list" hx-trigger="every 4s" hx-target="#jobs-list" hx-swap="innerHTML"` : ''}>
+      <td>
+        <strong style="font-size:0.85rem">${job.name}</strong><br>
+        <span class="meta">${job.prompt.slice(0, 70)}${job.prompt.length > 70 ? '…' : ''}</span>
+        ${job.scheduledTaskId ? `<br><span class="meta" style="font-size:0.7rem">scheduled</span>` : ''}
+      </td>
+      <td class="meta" style="font-size:0.75rem">${created}${duration ? `<br>${duration}` : ''}</td>
+      <td class="meta" style="font-size:0.75rem">${target}</td>
+      <td style="white-space:nowrap">${statusBadge}</td>
+      <td style="white-space:nowrap">
+        <div style="display:flex;gap:0.25rem;flex-wrap:wrap">
+          ${(job.result || job.error) ? `
+          <button class="btn btn--sm" style="font-size:0.65rem"
+            onclick="document.getElementById('job-result-${job.id}').toggleAttribute('hidden')">
+            ${job.error ? 'Error' : 'Result'}
+          </button>` : ''}
+          ${isTerminal ? `
+          <button class="btn btn--sm btn--danger" style="font-size:0.65rem"
+            hx-delete="/tasks/jobs/${job.id}"
+            hx-target="#jobs-list"
+            hx-swap="innerHTML"
+            hx-confirm="Dismiss job '${escAttr(job.name)}'?">
+            Dismiss
+          </button>` : `
+          <button class="btn btn--sm btn--danger" style="font-size:0.65rem"
+            hx-delete="/tasks/jobs/${job.id}"
+            hx-target="#jobs-list"
+            hx-swap="innerHTML"
+            hx-confirm="Cancel job '${escAttr(job.name)}'?">
+            Cancel
+          </button>`}
+        </div>
+      </td>
+    </tr>
+    ${resultRow}`;
+}
+
+function renderJobsList(jobs: Job[]): string {
+  if (jobs.length === 0) {
+    return '<p class="meta" style="padding:0.5rem 0">No recent jobs.</p>';
+  }
+  const hasRunning = jobs.some((j) => j.status === 'running' || j.status === 'queued');
+  return `
+    ${hasRunning ? `<div id="jobs-live-indicator" style="font-size:0.7rem;color:#58a6ff;margin-bottom:0.5rem">● Live</div>` : ''}
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Job</th><th>Started</th><th>Target</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody>${jobs.map(renderJobRow).join('')}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderTaskRow(task: Task): string {
@@ -196,10 +307,40 @@ function renderTasksList(tasks: Task[]): string {
 
 export default app;
 
+app.get('/tasks/jobs/list', async (c) => {
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/jobs?limit=50`, { headers: agentHeaders() });
+    const jobs = (await res.json()) as Job[];
+    // Show most recent first, exclude scheduled-task-spawned jobs from this list
+    const adHocJobs = jobs.filter((j) => !j.scheduledTaskId).reverse();
+    return c.html(renderJobsList(adHocJobs));
+  } catch {
+    return c.html('<p class="meta badge--red">Could not load jobs</p>');
+  }
+});
+
+app.delete('/tasks/jobs/:id', async (c) => {
+  const id = c.req.param('id');
+  try {
+    await fetch(`${AGENT_URL()}/api/jobs/${id}`, { method: 'DELETE', headers: agentHeaders() });
+    const res = await fetch(`${AGENT_URL()}/api/jobs?limit=50`, { headers: agentHeaders() });
+    const jobs = (await res.json()) as Job[];
+    const adHocJobs = jobs.filter((j) => !j.scheduledTaskId).reverse();
+    return c.html(renderJobsList(adHocJobs));
+  } catch {
+    return c.html('<p class="meta badge--red">Could not dismiss job</p>');
+  }
+});
+
 app.get('/tasks', async (c) => {
   try {
-    const res = await fetch(`${AGENT_URL()}/api/tasks`);
-    const tasks = (await res.json()) as Task[];
+    const [tasksRes, jobsRes] = await Promise.all([
+      fetch(`${AGENT_URL()}/api/tasks`, { headers: agentHeaders() }),
+      fetch(`${AGENT_URL()}/api/jobs?limit=50`, { headers: agentHeaders() }),
+    ]);
+    const tasks = (await tasksRes.json()) as Task[];
+    const allJobs = (await jobsRes.json()) as Job[];
+    const adHocJobs = allJobs.filter((j) => !j.scheduledTaskId).reverse();
 
     const createForm = `
       <div class="card" style="margin-bottom:1rem">
@@ -308,9 +449,19 @@ app.get('/tasks', async (c) => {
         }
       </script>`;
 
+    const jobsSection = `
+      <h2 style="margin-top:1.5rem;margin-bottom:0.5rem">Background Jobs</h2>
+      <div id="jobs-list"
+        hx-get="/tasks/jobs/list"
+        hx-trigger="load, every 8s [document.querySelector('.badge--blue')]"
+        hx-swap="innerHTML">
+        ${renderJobsList(adHocJobs)}
+      </div>`;
+
     const content = `<h1>Scheduled Tasks</h1>
       ${createForm}
       <div id="tasks-list">${renderTasksList(tasks)}</div>
+      ${jobsSection}
       ${script}`;
 
     return c.html(layout('Tasks', content));

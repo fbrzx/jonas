@@ -126,6 +126,20 @@ export class BackgroundJobManager {
     return this.jobs.find((j) => j.id === id);
   }
 
+  /**
+   * Dismiss (remove from history) a terminal job. Returns false if not found or still running.
+   */
+  async dismiss(id: string): Promise<boolean> {
+    const idx = this.jobs.findIndex((j) => j.id === id);
+    if (idx === -1) return false;
+    const job = this.jobs[idx];
+    if (job.status === 'running' || job.status === 'queued') return false;
+    this.jobs.splice(idx, 1);
+    await this.persist();
+    log.debug({ id }, 'Job dismissed');
+    return true;
+  }
+
   private async runJob(job: BackgroundJob): Promise<void> {
     // Skip if cancelled before we started
     if (job.status === 'cancelled') {

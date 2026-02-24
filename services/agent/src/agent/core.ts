@@ -154,6 +154,7 @@ export class AgentCore {
     const skillPrompts = this.skillRegistry?.getEnabledPrompts();
     const systemPrompt = assembleSystemPrompt(memories, skillPrompts, {
       providerName: this.provider.getName(),
+      channel,
     });
 
     // Rebuild MCP config with current skill servers
@@ -243,7 +244,7 @@ export class AgentCore {
 
           onToolUse?.(call.name, call.input);
           const toolResult = await this.withTimeout(
-            this.executeTool(call.name, call.input),
+            this.executeTool(call.name, call.input, channel),
             TOOL_TIMEOUT_MS,
             `Tool ${call.name} timed out after ${TOOL_TIMEOUT_MS}ms`,
           );
@@ -585,7 +586,7 @@ export class AgentCore {
     return tools;
   }
 
-  private async executeTool(name: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async executeTool(name: string, input: Record<string, unknown>, channel?: Channel): Promise<Record<string, unknown>> {
     switch (name) {
       case 'memory_remember': {
         if (!this.memory || !this.embeddings) {
@@ -784,10 +785,20 @@ export class AgentCore {
           return { error: 'Invalid input for job_run: name and prompt are required' };
         }
 
-        const targetChannel =
-          typeof input.targetChannelType === 'string' && typeof input.targetChannelId === 'string'
-            ? { type: input.targetChannelType, id: input.targetChannelId }
-            : undefined;
+        let targetChannel: { type: string; id: string } | undefined;
+        if (typeof input.targetChannelType === 'string' && typeof input.targetChannelId === 'string') {
+          // Normalize: strip 'channel:' prefix so registry lookup works (handlers keyed by dirName)
+          targetChannel = {
+            type: input.targetChannelType.replace(/^channel:/, ''),
+            id: input.targetChannelId,
+          };
+        } else if (channel) {
+          // Auto-inherit the originating channel so results are always delivered back
+          targetChannel = {
+            type: channel.type.replace(/^channel:/, ''),
+            id: channel.id,
+          };
+        }
 
         const timeoutMs =
           typeof input.timeoutMs === 'number' && input.timeoutMs > 0
