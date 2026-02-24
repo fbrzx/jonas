@@ -288,9 +288,13 @@ export class ChannelRegistry {
     // Create sendToAgent callback
     const sendToAgent = async (message: string, channelId: string): Promise<string> => {
       try {
+        const agentToken = (process.env.AGENT_API_TOKEN ?? '').trim();
         const response = await fetch('http://localhost:3001/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(agentToken ? { 'x-agent-token': agentToken } : {}),
+          },
           body: JSON.stringify({
             message,
             channelType: `channel:${channelName}`,
