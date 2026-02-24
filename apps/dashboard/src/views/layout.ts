@@ -5,6 +5,7 @@ const NAV_PINNED = [
 const NAV_ITEMS = [
   { href: '/skills', label: 'Skills' },
   { href: '/channels', label: 'Channels' },
+  { href: '/memory', label: 'Memory' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/audit', label: 'Audit' },
 ];
@@ -36,7 +37,7 @@ export function layout(title: string, content: string): string {
   const nav = NAV_ITEMS.map(
     (item) => `<a href="${item.href}">${item.label}</a>`
   ).join('');
-  const mobileNav = [...NAV_PINNED, ...NAV_ITEMS].map(
+  const mobileNav = [...NAV_ITEMS].map(
     (item) => `<a href="${item.href}" class="mobile-nav__link">${item.label}</a>`
   ).join('');
   
@@ -135,6 +136,7 @@ export function layout(title: string, content: string): string {
       text-decoration: none;
       color: #58a6ff;
       font-size: 0.88rem;
+      margin-left: 105px;
     }
     .mobile-nav__link:hover { background: #1f293744; }
     .env-label {
