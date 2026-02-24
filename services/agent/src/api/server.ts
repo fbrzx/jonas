@@ -891,6 +891,20 @@ export function createApiServer(deps: ApiDeps) {
     }
   });
 
+  app.post('/api/channels/:name/webhook', async (c) => {
+    if (!deps.channelRegistry) return c.json({ error: 'Channels not available' }, 503);
+    const name = c.req.param('name');
+    try {
+      const body = await c.req.json();
+      await deps.channelRegistry.handleWebhook(name, body);
+      return c.json({ ok: true });
+    } catch (err) {
+      log.error(err, 'Failed to handle webhook');
+      const msg = err instanceof Error ? err.message : 'Webhook handling failed';
+      return c.json({ error: msg }, 500);
+    }
+  });
+
   // --- OAuth provider endpoints ---
 
   app.get('/api/oauth/providers', (c) => {

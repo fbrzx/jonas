@@ -263,6 +263,15 @@ export class ChannelRegistry {
     await handler.send(channelId, text);
   }
 
+  async handleWebhook(name: string, body: unknown): Promise<void> {
+    const channel = this.channels.get(name);
+    if (!channel) throw new Error(`Channel not found: ${name}`);
+    if (channel.state !== 'running') throw new Error(`Channel not running: ${name}`);
+    const handler = this.handlers.get(name);
+    if (!handler?.handleWebhook) throw new Error(`Channel does not support webhooks: ${name}`);
+    await handler.handleWebhook(body);
+  }
+
   private async loadHandler(channel: PlatformChannel): Promise<ChannelHandler> {
     const jsHandlerPath = join(channel.filePath, 'handler.js');
 

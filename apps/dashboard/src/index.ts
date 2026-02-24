@@ -16,6 +16,7 @@ import chatRoutes from './routes/chat.js';
 import oauthRoutes from './routes/oauth.js';
 import channelsRoutes from './routes/channels.js';
 import loginRoutes from './routes/login.js';
+import webhooksRoutes from './routes/webhooks.js';
 
 const log = createLogger('dashboard');
 const app = new Hono();
@@ -165,7 +166,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }));
 
 app.use('*', async (c, next) => {
   const path = c.req.path;
-  if (path === '/health' || path === '/login' || path === '/manifest.webmanifest' || path.startsWith('/oauth/') || path.startsWith('/assets/')) {
+  if (path === '/health' || path === '/login' || path === '/manifest.webmanifest' || path.startsWith('/oauth/') || path.startsWith('/assets/') || path.startsWith('/webhooks/')) {
     await next();
     return;
   }
@@ -191,6 +192,9 @@ app.use('*', async (c, next) => {
   c.status(401);
   return c.json({ error: 'Unauthorized dashboard access' });
 });
+
+// Webhook proxy — auth bypassed via the middleware bypass list above
+app.route('/', webhooksRoutes);
 
 // Mount routes
 app.route('/', loginRoutes);

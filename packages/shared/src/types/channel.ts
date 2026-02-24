@@ -37,4 +37,5 @@ export interface ChannelHandler {
   start: () => Promise<void>;
   stop: () => Promise<void>;
   send: (channelId: string, text: string) => Promise<void>;
+  handleWebhook?: (body: unknown) => Promise<void>;
 }
