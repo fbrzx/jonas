@@ -58,7 +58,51 @@ function renderSkillRow(s: Skill): string {
     </tr>`;
 }
 
-app.get('/skills', (c) => c.redirect('/ext'));
+app.get('/skills', async (c) => {
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/skills`);
+    const skills = (await res.json()) as Skill[];
+    const importStatus = c.req.query('importStatus') ?? null;
+    const importMessage = c.req.query('importMessage') ?? null;
+
+    const messageHtml = importMessage
+      ? `<p class="badge ${importStatus === 'success' ? 'badge--green' : 'badge--red'}" style="margin-bottom:0.75rem">${importMessage}</p>`
+      : '';
+
+    const rows = skills.length
+      ? skills.map(renderSkillRow).join('')
+      : '<tr><td colspan="4" class="meta" style="padding:1rem">No skills installed.</td></tr>';
+
+    return c.html(layout('Skills', `
+      <h1>Skills</h1>
+      <div class="card">
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Name</th><th>Features</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Import Skill</h2>
+        <p class="meta" style="margin-bottom:0.75rem">Upload a .zip skill package.</p>
+        ${messageHtml}
+        <form action="/skills/import" method="post" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
+          <input type="file" name="file" accept=".zip" required
+            style="width:100%;max-width:420px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;padding:0.35rem;font-family:inherit;font-size:0.875rem">
+          <label style="display:flex;align-items:center;gap:0.5rem">
+            <input type="checkbox" name="overwrite" value="true">
+            <span class="meta">Overwrite if already exists</span>
+          </label>
+          <button type="submit" class="btn btn--sm" style="align-self:flex-start">Import</button>
+        </form>
+      </div>
+    `));
+  } catch {
+    return c.html(layout('Skills', '<h1>Skills</h1><p class="badge badge--red">Agent unreachable</p>'));
+  }
+});
 
 // --- Detail page ---
 
@@ -260,7 +304,7 @@ function renderSkillDetail(skill: Skill, channels: PlatformChannel[]): string {
   const id = encodeURIComponent(skill.dirName);
 
   return `
-    <p><a href="/ext">&larr; Back to Plugins</a></p>
+    <p><a href="/skills">&larr; Back to Skills</a></p>
     <h1>${skill.metadata.name}</h1>
 
     <div class="card">
@@ -498,20 +542,18 @@ app.get('/skills/:id/export', async (c) => {
 
 // --- Import skill ---
 
+function redirectToSkills(status: 'success' | 'error', message: string): Response {
+  const params = new URLSearchParams({ importStatus: status, importMessage: message });
+  return new Response(null, { status: 302, headers: { Location: `/skills?${params}` } });
+}
+
 app.post('/skills/import', async (c) => {
   try {
     const body = await c.req.parseBody();
     const file = body.file;
 
     if (!file || typeof file === 'string') {
-      return c.html(
-        layout(
-          'Import Failed',
-          `<h1>Import Failed</h1>
-           <p class="badge badge--red">No file uploaded</p>
-           <p><a href="/ext">&larr; Back to Plugins</a></p>`,
-        ),
-      );
+      return redirectToSkills('error', 'No file uploaded');
     }
 
     // Create new FormData and properly forward the file
@@ -531,28 +573,14 @@ app.post('/skills/import', async (c) => {
 
     if (!res.ok) {
       const error = (await res.json()) as { error?: string };
-      return c.html(
-        layout(
-          'Import Failed',
-          `<h1>Import Failed</h1>
-           <p class="badge badge--red">${error.error || 'Unknown error'}</p>
-           <p><a href="/ext">&larr; Back to Plugins</a></p>`,
-        ),
-      );
+      return redirectToSkills('error', error.error || 'Unknown error');
     }
 
     const result = (await res.json()) as { skill: { dirName: string } };
     return c.redirect(`/skills/${encodeURIComponent(result.skill.dirName)}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Agent unreachable';
-    return c.html(
-      layout(
-        'Import Failed',
-        `<h1>Import Failed</h1>
-         <p class="badge badge--red">${message}</p>
-         <p><a href="/ext">&larr; Back to Plugins</a></p>`,
-      ),
-    );
+    return redirectToSkills('error', message);
   }
 });
 
