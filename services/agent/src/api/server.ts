@@ -412,6 +412,42 @@ export function createApiServer(deps: ApiDeps) {
     return c.json({ count: memories.length, memories });
   });
 
+  app.get('/api/memory/graph', async (c) => {
+    const limit = Math.min(Number(c.req.query('limit') ?? 60), 150);
+    const threshold = Math.max(0, Math.min(1, Number(c.req.query('threshold') ?? 0.6)));
+
+    const items = await deps.memory.allWithVectors(limit);
+
+    const nodes = items.map(({ memory }) => ({
+      id: memory.id,
+      category: memory.category,
+      content: memory.content,
+      createdAt: memory.createdAt,
+    }));
+
+    // Compute pairwise cosine similarity and build edges above threshold
+    const edges: Array<{ source: string; target: string; weight: number }> = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const va = items[i].vector;
+      for (let j = i + 1; j < items.length; j++) {
+        const vb = items[j].vector;
+        let dot = 0, na = 0, nb = 0;
+        for (let k = 0; k < va.length; k++) {
+          dot += va[k] * vb[k];
+          na += va[k] * va[k];
+          nb += vb[k] * vb[k];
+        }
+        const sim = dot / (Math.sqrt(na) * Math.sqrt(nb));
+        if (sim >= threshold) {
+          edges.push({ source: items[i].memory.id, target: items[j].memory.id, weight: sim });
+        }
+      }
+    }
+
+    return c.json({ nodes, edges });
+  });
+
   // Conversations (in-memory)
   app.get('/api/conversations', (c) => {
     return c.json(deps.agent.getConversations());
