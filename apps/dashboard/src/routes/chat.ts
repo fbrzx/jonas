@@ -17,6 +17,18 @@ function safeExcerpt(text: string, max = 140): string {
   return `${normalized.slice(0, max)}...`;
 }
 
+// Lightweight ping — checks if agent is reachable
+app.get('/chat/ping', async (c) => {
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/status`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    return c.json({ ok: res.ok });
+  } catch {
+    return c.json({ ok: false }, 503);
+  }
+});
+
 app.get('/chat', (c) => {
   const content = `
     <div class="chat-container">
@@ -28,6 +40,7 @@ app.get('/chat', (c) => {
         </div>
       </div>
       <div id="chat-messages" class="chat-messages"></div>
+      <div id="chat-status-banner" class="chat-status-banner" hidden>● Agent unreachable — retrying...</div>
       <div class="chat-input-bar">
         <textarea id="chat-input" placeholder="Send a message... (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
         <button id="btn-send" class="btn">Send</button>
@@ -54,6 +67,8 @@ app.get('/chat', (c) => {
 
       var abortController = null;
       var messages = []; // [{role, content}]
+      var agentReachable = true;
+      var statusBanner = document.getElementById('chat-status-banner');
 
       // --- Restore saved messages ---
       try {
@@ -113,6 +128,27 @@ app.get('/chat', (c) => {
         messagesEl.scrollTop = messagesEl.scrollHeight;
       }
 
+      function applyReachableState() {
+        statusBanner.hidden = agentReachable;
+        sendBtn.disabled = !agentReachable;
+        inputEl.disabled = !agentReachable;
+      }
+
+      async function checkAgentStatus() {
+        try {
+          var res = await fetch('/chat/ping');
+          var data = await res.json();
+          agentReachable = data.ok === true;
+        } catch(e) {
+          agentReachable = false;
+        }
+        applyReachableState();
+      }
+
+      // Check immediately, then every 10 seconds
+      checkAgentStatus();
+      setInterval(checkAgentStatus, 10000);
+
       function setLoading(loading) {
         if (loading) {
           sendBtn.style.display = 'none';
@@ -121,8 +157,8 @@ app.get('/chat', (c) => {
         } else {
           sendBtn.style.display = '';
           abortBtn.style.display = 'none';
-          inputEl.disabled = false;
-          inputEl.focus();
+          inputEl.disabled = !agentReachable;
+          if (agentReachable) inputEl.focus();
         }
       }
 

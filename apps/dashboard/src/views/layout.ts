@@ -3,9 +3,9 @@ const NAV_PINNED = [
 ];
 
 const NAV_ITEMS = [
+  { href: '/memory', label: 'Memory' },
   { href: '/skills', label: 'Skills' },
   { href: '/channels', label: 'Channels' },
-  { href: '/memory', label: 'Memory' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/audit', label: 'Audit' },
 ];
@@ -243,7 +243,7 @@ export function layout(title: string, content: string): string {
     .chat-msg--error { background: #f8514911 !important; border-color: #f85149 !important; }
     .chat-msg__label { font-size: 0.7rem; font-weight: 600; margin-bottom: 0.25rem; opacity: 0.7; }
     .chat-msg__content { white-space: pre-wrap; margin: 0; font-family: inherit; font-size: 0.875rem; background: none; border: none; color: inherit; }
-    .chat-input-bar { display: flex; gap: 0.5rem; padding-top: 0.75rem; border-top: 1px solid #30363d; align-items: flex-end; }
+    .chat-input-bar { display: flex; gap: 0.5rem; padding-top: 0.75rem; border-top: 1px solid #30363d; align-items: stretch; }
     .chat-input-bar textarea {
       flex: 1; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
       padding: 0.5rem 0.75rem; border-radius: 6px; font-family: inherit; font-size: 0.875rem;
@@ -254,9 +254,16 @@ export function layout(title: string, content: string): string {
     .chat-input-bar button {
       background: #238636; color: #fff; border: none; padding: 0.5rem 1rem;
       border-radius: 6px; font-family: inherit; font-size: 0.875rem; cursor: pointer;
-      white-space: nowrap;
+      white-space: nowrap; display: flex; align-items: center;
     }
     .chat-input-bar button:hover { background: #2ea043; }
+    .chat-input-bar button.btn--danger { background: #da3633; }
+    .chat-input-bar button.btn--danger:hover { background: #f85149; }
+    .chat-input-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .chat-status-banner {
+      padding: 0.4rem 0.75rem; background: #f8514911; border: 1px solid #f8514966;
+      border-radius: 6px; color: #f85149; font-size: 0.78rem; margin-bottom: 0.5rem;
+    }
     /* Typing indicator */
     .typing-dots span {
       animation: blink 1.4s infinite both;

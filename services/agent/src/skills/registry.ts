@@ -99,10 +99,17 @@ export class SkillRegistry {
 
   private async loadSkill(dirName: string): Promise<void> {
     const skillDir = join(SKILLS_DIR, dirName);
-    const mdPath = join(skillDir, 'skill.md');
+    // Accept both Jonas format (skill.md) and Claude Code format (SKILL.md)
+    const mdPathLower = join(skillDir, 'skill.md');
+    const mdPathUpper = join(skillDir, 'SKILL.md');
+    const mdPath = (await fileExists(mdPathLower))
+      ? mdPathLower
+      : (await fileExists(mdPathUpper))
+        ? mdPathUpper
+        : null;
 
-    if (!(await fileExists(mdPath))) {
-      log.warn({ dir: dirName }, 'Skipping directory without skill.md');
+    if (!mdPath) {
+      log.warn({ dir: dirName }, 'Skipping directory without skill.md or SKILL.md');
       return;
     }
 
@@ -327,6 +334,94 @@ export class SkillRegistry {
     return skill.config ?? null;
   }
 
+  /**
+   * Import a skill directly from a SKILL.md (or skill.md) string.
+   * Used when importing a Claude Code skill uploaded as a plain markdown file.
+   */
+  async importFromMarkdown(content: string, overwrite = false): Promise<Skill> {
+    const { meta, body } = parseFrontmatter(content);
+    const dirName = (meta.name || 'imported-skill').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+
+    if (this.skills.has(dirName) && !overwrite) {
+      throw new Error(`Skill "${dirName}" already exists. Set overwrite=true to replace.`);
+    }
+
+    if (this.skills.has(dirName) && overwrite) {
+      await this.delete(dirName);
+    }
+
+    return this.create({ dirName, skillMd: content });
+  }
+
+  /**
+   * Export a skill as a Claude Code-compatible SKILL.md string.
+   * Only exports the prompt body — tool servers are Jonas-specific and not portable.
+   */
+  exportAsClaudeSkillMd(name: string): string | null {
+    const skill = this.skills.get(name);
+    if (!skill) return null;
+    const body = this.bodies.get(name) ?? '';
+    const { name: skillName, description } = skill.metadata;
+    const dirName = skillName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const frontmatter = `---\nname: ${dirName}\ndescription: ${description}\n---`;
+    return body ? `${frontmatter}\n\n${body}` : frontmatter;
+  }
+
+  /**
+   * Sync skills from a Claude Code skills directory (e.g. ~/.claude/skills or /claude-skills).
+   * Each subdirectory containing a SKILL.md or skill.md is imported if not already present.
+   * Returns { imported, skipped, errors }.
+   */
+  async syncFromClaudeSkillsDir(
+    dir: string,
+  ): Promise<{ imported: string[]; skipped: string[]; errors: string[] }> {
+    const imported: string[] = [];
+    const skipped: string[] = [];
+    const errors: string[] = [];
+
+    let entries: string[];
+    try {
+      const dirEntries = await readdir(dir, { withFileTypes: true });
+      entries = dirEntries.filter((e) => e.isDirectory()).map((e) => e.name);
+    } catch (err) {
+      throw new Error(`Cannot read Claude skills directory: ${dir}`);
+    }
+
+    for (const entry of entries) {
+      const entryDir = join(dir, entry);
+      const mdPathUpper = join(entryDir, 'SKILL.md');
+      const mdPathLower = join(entryDir, 'skill.md');
+      const mdPath = (await fileExists(mdPathUpper))
+        ? mdPathUpper
+        : (await fileExists(mdPathLower))
+          ? mdPathLower
+          : null;
+
+      if (!mdPath) {
+        skipped.push(entry);
+        continue;
+      }
+
+      const dirName = entry.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+      if (this.skills.has(dirName)) {
+        skipped.push(entry);
+        continue;
+      }
+
+      try {
+        const skillMd = await readFile(mdPath, 'utf-8');
+        await this.create({ dirName, skillMd });
+        imported.push(entry);
+      } catch (err) {
+        errors.push(entry);
+        log.error({ entry, err }, 'Failed to import Claude skill');
+      }
+    }
+
+    log.info({ dir, imported: imported.length, skipped: skipped.length, errors: errors.length }, 'Claude skills sync complete');
+    return { imported, skipped, errors };
+  }
+
   /** Update skill config.json */
   async updateConfig(name: string, config: SkillConfig): Promise<boolean> {
     const skill = this.skills.get(name);
@@ -437,7 +532,11 @@ export class SkillRegistry {
 
     // Detect if files are nested in a parent directory
     let baseDir = '';
-    const skillMdEntry = entries.find((e) => !e.isDirectory && e.entryName.endsWith('skill.md'));
+    const skillMdEntry = entries.find(
+      (e) =>
+        !e.isDirectory &&
+        (e.entryName.endsWith('skill.md') || e.entryName.endsWith('SKILL.md')),
+    );
 
     if (!skillMdEntry) {
       throw new Error('Invalid skill package: missing skill.md');

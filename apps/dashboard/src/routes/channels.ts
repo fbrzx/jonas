@@ -72,60 +72,56 @@ function renderConfigSection(channel: PlatformChannel): string {
   const optionalSecrets = channel.config?.optionalSecrets ?? [];
   const allConfigKeys = [...requiredSecrets, ...optionalSecrets];
 
-  if (allConfigKeys.length === 0) {
-    return '<p class="meta">This channel requires no configuration.</p>';
-  }
+  // Per-key inline edit rows
+  const keyRows = allConfigKeys.map((key) => {
+    const isRequired = requiredSecrets.includes(key);
+    const isSet = allKeys.includes(key);
+    const statusBadge = isSet
+      ? '<span class="badge badge--green">set</span>'
+      : '<span class="badge badge--red">missing</span>';
+    const kindLabel = isRequired
+      ? '<span class="meta" style="font-size:0.7rem">required</span>'
+      : '<span class="meta" style="font-size:0.7rem">optional</span>';
+    const placeholder = isSet ? 'Leave blank to keep current, or enter new value…' : 'Enter value…';
+    const removeBtn = isSet
+      ? `<button class="btn btn--sm btn--danger"
+           hx-post="/channels/${id}/values/${encodeURIComponent(key)}/delete"
+           hx-target="#config-section" hx-swap="innerHTML"
+           title="Remove this value">✕</button>`
+      : '';
+    return `
+      <div style="margin-bottom:0.75rem">
+        <div style="margin-bottom:0.25rem">${statusBadge} <code>${key}</code> ${kindLabel}</div>
+        <form hx-post="/channels/${id}/values"
+              hx-target="#config-section" hx-swap="innerHTML"
+              style="display:flex;gap:0.5rem;align-items:center">
+          <input type="hidden" name="key" value="${key}">
+          <input type="password" name="value" placeholder="${placeholder}"
+                 style="flex:1;max-width:360px">
+          <button type="submit" class="btn btn--sm">Save</button>
+          ${removeBtn}
+        </form>
+      </div>`;
+  }).join('');
 
-  const configRows = allConfigKeys
-    .map((key) => {
-      const isRequired = requiredSecrets.includes(key);
-      const isSet = allKeys.includes(key);
-      const actionHtml = isSet
-        ? `<button class="btn btn--sm btn--danger"
-             hx-post="/channels/${id}/values/${encodeURIComponent(key)}/delete"
-             hx-target="#config-section" hx-swap="innerHTML"
-           >Remove</button>`
-        : '';
-      return `
-        <tr>
-          <td><code>${key}</code> ${isRequired ? '<span class="badge badge--red" style="font-size:0.7rem">required</span>' : '<span class="meta" style="font-size:0.7rem">optional</span>'}</td>
-          <td><span class="badge ${isSet ? 'badge--green' : 'badge--red'}">${isSet ? 'set' : 'missing'}</span></td>
-          <td>${actionHtml}</td>
-        </tr>`;
-    })
-    .join('');
-
-  let html = `
-    <div class="table-scroll">
-      <table style="min-width:540px">
-        <thead><tr><th>Key</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>${configRows}</tbody>
-      </table>
-    </div>`;
-
-  const unsetKeys = allConfigKeys.filter((k) => !allKeys.includes(k));
-  const options = unsetKeys.map((k) => `<option value="${k}">${k}</option>`).join('');
-
-  html += `
-    <div style="margin-top:1rem">
+  // Custom key section
+  const customKeyForm = `
+    <details id="channel-add-key-${id}" hx-preserve style="margin-top:1rem">
+      <summary class="meta" style="cursor:pointer;user-select:none">Add custom key</summary>
       <form hx-post="/channels/${id}/values"
             hx-target="#config-section" hx-swap="innerHTML"
-            style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
-        <label class="meta">Key</label>
-        <div style="display:flex;gap:0.5rem">
-          <select name="key" style="flex:1" required>
-            <option value="">Select a key…</option>
-            ${options}
-          </select>
-          <input type="text" name="customKey" placeholder="or type custom key" style="flex:1;max-width:none">
-        </div>
-        <label class="meta">Value</label>
-        <textarea name="value" placeholder="Paste value here…" required></textarea>
-        <button type="submit" class="btn" style="align-self:flex-start">Save</button>
+            style="display:flex;gap:0.5rem;align-items:center;margin-top:0.5rem;flex-wrap:wrap">
+        <input type="text" name="customKey" placeholder="Key name" required style="width:160px">
+        <input type="password" name="value" placeholder="Value" required style="flex:1;max-width:300px">
+        <button type="submit" class="btn btn--sm">Save</button>
       </form>
-    </div>`;
+    </details>`;
 
-  return html;
+  if (allConfigKeys.length === 0) {
+    return `<h2>Configuration</h2><p class="meta" style="margin-bottom:0.75rem">No required keys declared.</p>${customKeyForm}`;
+  }
+
+  return `<h2>Configuration</h2>${keyRows}${customKeyForm}`;
 }
 
 function renderPairingSection(channel: PlatformChannel, pairing: PairingStatus | null, pairingMessage?: string): string {
@@ -321,7 +317,6 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
     </div>
 
     <div class="card" id="config-section">
-      <h2>Configuration</h2>
       ${renderConfigSection(channel)}
     </div>
 
@@ -449,16 +444,17 @@ app.post('/channels/:name/values', async (c) => {
   const name = c.req.param('name');
   const body = await c.req.parseBody();
 
-  const key = body.customKey || body.key;
-  if (!key) {
-    return c.html('<div class="badge badge--red">No key specified</div>');
-  }
+  const key = (body.customKey as string) || (body.key as string);
+  const value = (body.value as string) ?? '';
 
-  await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}/values`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, value: body.value }),
-  });
+  // Only save if both key and value are non-empty
+  if (key && value) {
+    await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}/values`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value }),
+    });
+  }
 
   const res = await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}`);
   const channel = (await res.json()) as PlatformChannel;

@@ -715,6 +715,46 @@ server.tool(
   },
 );
 
+server.tool(
+  'skill_export_claude',
+  'Export a skill as a Claude Code-compatible SKILL.md string. The output can be placed in ~/.claude/skills/<name>/SKILL.md to use the skill in any Claude Code session.',
+  {
+    name: z.string().describe('Skill directory name'),
+  },
+  async ({ name }) => {
+    const res = await apiFetch(`/api/skills/${encodeURIComponent(name)}/export-claude`);
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Skill not found' }) }], isError: true };
+    }
+    const content = await res.text();
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          filename: 'SKILL.md',
+          installPath: `~/.claude/skills/${name}/SKILL.md`,
+          content,
+        }),
+      }],
+    };
+  },
+);
+
+server.tool(
+  'skill_sync_claude',
+  'Import all skills from the mounted Claude Code skills directory (requires CLAUDE_SKILLS_PATH to be configured). Skills already installed are skipped.',
+  {},
+  async () => {
+    const res = await apiFetch('/api/skills/sync-claude', { method: 'POST' });
+    const data = await res.json() as { error?: string; imported?: string[]; skipped?: string[]; errors?: string[] };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Sync failed' }) }], isError: true };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+  },
+);
+
 // --- OAuth tools (chat-guided OAuth) ---
 
 server.tool(

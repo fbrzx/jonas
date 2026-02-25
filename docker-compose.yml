@@ -24,6 +24,9 @@ services:
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:latest}
     volumes:
       - ./.volumes/agent-data:/data
+      # Optional: mount host Claude Code skills dir for bidirectional sync
+      # Uncomment and set CLAUDE_SKILLS_PATH=/claude-skills in your .env to enable
+      # - ${HOME}/.claude/skills:/claude-skills:rw
     networks:
       - internal
       - public

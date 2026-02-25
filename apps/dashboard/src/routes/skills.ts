@@ -86,10 +86,10 @@ app.get('/skills', async (c) => {
 
       <div class="card">
         <h2>Import Skill</h2>
-        <p class="meta" style="margin-bottom:0.75rem">Upload a .zip skill package.</p>
+        <p class="meta" style="margin-bottom:0.75rem">Upload a .zip skill package or a Claude Code <code>SKILL.md</code> file.</p>
         ${messageHtml}
         <form action="/skills/import" method="post" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
-          <input type="file" name="file" accept=".zip" required
+          <input type="file" name="file" accept=".zip,.md" required
             style="width:100%;max-width:420px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;padding:0.35rem;font-family:inherit;font-size:0.875rem">
           <label style="display:flex;align-items:center;gap:0.5rem">
             <input type="checkbox" name="overwrite" value="true">
@@ -98,6 +98,7 @@ app.get('/skills', async (c) => {
           <button type="submit" class="btn btn--sm" style="align-self:flex-start">Import</button>
         </form>
       </div>
+
     `));
   } catch {
     return c.html(layout('Skills', '<h1>Skills</h1><p class="badge badge--red">Agent unreachable</p>'));
@@ -123,61 +124,52 @@ function renderConfigSection(skill: Skill): string {
     (k) => !oauthKeyNames.has(k),
   );
 
-  if (configKeys.length === 0) {
-    return '<p class="meta">This skill requires no configuration.</p>';
-  }
+  // Per-key inline edit rows
+  const keyRows = configKeys.map((key) => {
+    const isSet = userKeys.includes(key);
+    const badge = isSet
+      ? '<span class="badge badge--green">set</span>'
+      : '<span class="badge badge--red">missing</span>';
+    const placeholder = isSet ? 'Leave blank to keep current, or enter new value…' : 'Enter value…';
+    const removeBtn = isSet
+      ? `<button class="btn btn--sm btn--danger"
+           hx-post="/skills/${id}/values/${encodeURIComponent(key)}/delete"
+           hx-target="#config-section" hx-swap="innerHTML"
+           title="Remove this value">✕</button>`
+      : '';
+    return `
+      <div style="margin-bottom:0.75rem">
+        <div style="margin-bottom:0.25rem">${badge} <code>${key}</code></div>
+        <form hx-post="/skills/${id}/values"
+              hx-target="#config-section" hx-swap="innerHTML"
+              style="display:flex;gap:0.5rem;align-items:center">
+          <input type="hidden" name="key" value="${key}">
+          <input type="password" name="value" placeholder="${placeholder}"
+                 style="flex:1;max-width:360px">
+          <button type="submit" class="btn btn--sm">Save</button>
+          ${removeBtn}
+        </form>
+      </div>`;
+  }).join('');
 
-  let html = '<h2>Configuration</h2>';
-
-  const configRows = configKeys
-    .map((key) => {
-      const isSet = userKeys.includes(key);
-      const actionHtml = isSet
-        ? `<button class="btn btn--sm btn--danger"
-             hx-post="/skills/${id}/values/${encodeURIComponent(key)}/delete"
-             hx-target="#config-section" hx-swap="innerHTML"
-           >Remove</button>`
-        : '';
-      return `
-        <tr>
-          <td><code>${key}</code></td>
-          <td><span class="badge ${isSet ? 'badge--green' : 'badge--red'}">${isSet ? 'set' : 'missing'}</span></td>
-          <td>${actionHtml}</td>
-        </tr>`;
-    })
-    .join('');
-
-  html += `
-    <div class="table-scroll">
-      <table style="min-width:520px">
-        <thead><tr><th>Key</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>${configRows}</tbody>
-      </table>
-    </div>`;
-
-  const unsetKeys = configKeys.filter((k) => !userKeys.includes(k));
-  const options = unsetKeys.map((k) => `<option value="${k}">${k}</option>`).join('');
-
-  html += `
-    <div style="margin-top:1rem">
+  // Custom key section (for keys not declared in config.json)
+  const customKeyForm = `
+    <details id="skill-add-key-${id}" hx-preserve style="margin-top:1rem">
+      <summary class="meta" style="cursor:pointer;user-select:none">Add custom key</summary>
       <form hx-post="/skills/${id}/values"
             hx-target="#config-section" hx-swap="innerHTML"
-            style="display:flex;flex-direction:column;gap:0.5rem;max-width:500px">
-        <label class="meta">Key</label>
-        <div style="display:flex;gap:0.5rem">
-          <select name="key" style="flex:1" required>
-            <option value="">Select a key…</option>
-            ${options}
-          </select>
-          <input type="text" name="customKey" placeholder="or type custom key" style="flex:1;max-width:none">
-        </div>
-        <label class="meta">Value</label>
-        <textarea name="value" placeholder="Paste value here…" required></textarea>
-        <button type="submit" class="btn" style="align-self:flex-start">Save</button>
+            style="display:flex;gap:0.5rem;align-items:center;margin-top:0.5rem;flex-wrap:wrap">
+        <input type="text" name="customKey" placeholder="Key name" required style="width:160px">
+        <input type="password" name="value" placeholder="Value" required style="flex:1;max-width:300px">
+        <button type="submit" class="btn btn--sm">Save</button>
       </form>
-    </div>`;
+    </details>`;
 
-  return html;
+  if (configKeys.length === 0) {
+    return `<h2>Configuration</h2><p class="meta" style="margin-bottom:0.75rem">No required keys declared.</p>${customKeyForm}`;
+  }
+
+  return `<h2>Configuration</h2>${keyRows}${customKeyForm}`;
 }
 
 function renderRequirements(skill: Skill, allChannels: PlatformChannel[]): string {
@@ -404,14 +396,16 @@ app.post('/skills/:id/values', async (c) => {
   try {
     const body = await c.req.parseBody();
     const key = (body.customKey as string) || (body.key as string);
-    const value = body.value as string;
-    if (!key || !value) return c.text('Missing key or value', 400);
+    const value = (body.value as string) ?? '';
 
-    await fetch(`${AGENT_URL()}/api/skills/${encodeURIComponent(id)}/values`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value }),
-    });
+    // Only save if both key and value are non-empty
+    if (key && value) {
+      await fetch(`${AGENT_URL()}/api/skills/${encodeURIComponent(id)}/values`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      });
+    }
 
     const res = await fetch(`${AGENT_URL()}/api/skills/${encodeURIComponent(id)}`);
     const skill = (await res.json()) as Skill;
@@ -556,17 +550,18 @@ app.post('/skills/import', async (c) => {
       return redirectToSkills('error', 'No file uploaded');
     }
 
-    // Create new FormData and properly forward the file
     const formData = new FormData();
     const arrayBuffer = await file.arrayBuffer();
-    const blob = new Blob([arrayBuffer], { type: 'application/zip' });
-    formData.append('file', blob, file.name || 'skill.zip');
+    if (body.overwrite === 'true') formData.append('overwrite', 'true');
 
-    if (body.overwrite === 'true') {
-      formData.append('overwrite', 'true');
-    }
+    // Route .md files (Claude Code SKILL.md format) to the dedicated endpoint
+    const isMd = (file.name ?? '').toLowerCase().endsWith('.md');
+    const endpoint = isMd ? '/api/skills/import-claude-md' : '/api/skills/import';
+    const mimeType = isMd ? 'text/markdown' : 'application/zip';
+    const blob = new Blob([arrayBuffer], { type: mimeType });
+    formData.append('file', blob, file.name || (isMd ? 'SKILL.md' : 'skill.zip'));
 
-    const res = await fetch(`${AGENT_URL()}/api/skills/import`, {
+    const res = await fetch(`${AGENT_URL()}${endpoint}`, {
       method: 'POST',
       body: formData,
     });

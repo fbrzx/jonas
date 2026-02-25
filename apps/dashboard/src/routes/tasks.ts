@@ -416,8 +416,10 @@ app.get('/tasks', async (c) => {
         }
 
         function handleTaskEditDone(editRowId, form, evt) {
-          var editRow = document.getElementById(editRowId);
-          if (editRow) editRow.setAttribute('hidden', '');
+          // Use querySelectorAll to catch any stale duplicate rows left by outerHTML swap
+          document.querySelectorAll('#' + editRowId).forEach(function(el) {
+            el.setAttribute('hidden', '');
+          });
           if (evt && evt.detail && evt.detail.successful && form && form.dataset.changed === '1') {
             window.jonasAck('Task changes saved');
           }
@@ -425,8 +427,9 @@ app.get('/tasks', async (c) => {
 
         function cancelTaskEdit(editRowId, form) {
           var changed = taskFormHasChanges(form);
-          var editRow = document.getElementById(editRowId);
-          if (editRow) editRow.setAttribute('hidden', '');
+          document.querySelectorAll('#' + editRowId).forEach(function(el) {
+            el.setAttribute('hidden', '');
+          });
           if (changed) {
             window.jonasAck('Changes discarded');
           }

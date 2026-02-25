@@ -762,6 +762,55 @@ export function createApiServer(deps: ApiDeps) {
     }
   });
 
+  // Import a skill from a raw SKILL.md / skill.md string (Claude Code format)
+  app.post('/api/skills/import-claude-md', async (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    try {
+      const body = await c.req.parseBody();
+      const file = body.file;
+      if (!file || typeof file === 'string') return c.json({ error: 'No file uploaded' }, 400);
+      const content = await (file as File).text();
+      const overwrite = body.overwrite === 'true';
+      const skill = await deps.skillRegistry.importFromMarkdown(content, overwrite);
+      return c.json({ success: true, skill }, 201);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Import failed';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  // Export a skill as a Claude Code-compatible SKILL.md file
+  app.get('/api/skills/:name/export-claude', (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    const name = c.req.param('name');
+    const content = deps.skillRegistry.exportAsClaudeSkillMd(name);
+    if (!content) return c.json({ error: 'Skill not found' }, 404);
+
+    return new Response(content, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Content-Disposition': `attachment; filename="SKILL.md"`,
+      },
+    });
+  });
+
+  // Sync skills from a mounted Claude Code skills directory (CLAUDE_SKILLS_PATH env)
+  app.post('/api/skills/sync-claude', async (c) => {
+    if (!deps.skillRegistry) return c.json({ error: 'Skills not available' }, 503);
+    const claudeSkillsPath = process.env.CLAUDE_SKILLS_PATH;
+    if (!claudeSkillsPath) {
+      return c.json({ error: 'CLAUDE_SKILLS_PATH is not configured' }, 400);
+    }
+    try {
+      const result = await deps.skillRegistry.syncFromClaudeSkillsDir(claudeSkillsPath);
+      return c.json({ success: true, ...result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Sync failed';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
   // --- Channel endpoints ---
 
   app.get('/api/channels', (c) => {

@@ -54,18 +54,6 @@ app.get('/memory', async (c) => {
   const isHtmx = c.req.header('HX-Request') === 'true';
 
   let resultsHtml = '';
-  let latestHtml = '';
-
-  try {
-    const agentUrl = process.env.AGENT_API_URL ?? 'http://localhost:3001';
-    const latestRes = await fetch(`${agentUrl}/api/memory/latest?limit=5`);
-    if (latestRes.ok) {
-      const latestData = (await latestRes.json()) as { memories: MemoryResult[] };
-      latestHtml = renderResults(latestData.memories, false);
-    }
-  } catch {
-    latestHtml = '<p class="badge badge--red">Could not load latest memories</p>';
-  }
 
   if (query) {
     try {
@@ -86,11 +74,11 @@ app.get('/memory', async (c) => {
     <h1>Memory</h1>
 
     <div style="display:flex;gap:0.5rem;margin-bottom:1.25rem">
-      <button id="tab-search-btn" class="btn btn--primary btn--sm" onclick="switchMemoryTab('search')">Search</button>
-      <button id="tab-graph-btn" class="btn btn--sm" onclick="switchMemoryTab('graph')">Graph</button>
+      <button id="tab-graph-btn" class="btn btn--primary btn--sm" onclick="switchMemoryTab('graph')">Graph</button>
+      <button id="tab-search-btn" class="btn btn--sm" onclick="switchMemoryTab('search')">Search</button>
     </div>
 
-    <div id="pane-search">
+    <div id="pane-search" style="display:none">
       <form style="margin-bottom:1rem">
         <input
           type="search" name="q" placeholder="Search memories..."
@@ -99,12 +87,10 @@ app.get('/memory', async (c) => {
           hx-include="this"
         />
       </form>
-      <h2>Latest 5 Memories</h2>
-      <div style="margin-bottom:1rem">${latestHtml || '<p class="meta">No recent memories yet.</p>'}</div>
       <div id="results">${resultsHtml}</div>
     </div>
 
-    <div id="pane-graph" style="display:none">
+    <div id="pane-graph">
       <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap">
         <div style="display:flex;gap:1rem;font-size:0.78rem;color:#8b949e">
           <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#58a6ff;margin-right:4px"></span>episodic</span>
@@ -141,6 +127,9 @@ app.get('/memory', async (c) => {
         if (!isSearch) loadGraph();
       }
 
+      // Graph is the default tab — load immediately
+      loadGraph();
+
       async function loadGraph() {
         if (graphLoaded) return;
         graphLoaded = true;
@@ -156,7 +145,7 @@ app.get('/memory', async (c) => {
         }
 
         if (data.error) {
-          document.getElementById('cy-loading').textContent = 'Error: ' + data.error;
+          document.getElementById('cy-loading').textContent = data.error;
           graphLoaded = false;
           return;
         }
