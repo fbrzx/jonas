@@ -114,6 +114,43 @@ export class MemoryClient {
     return info.points_count ?? 0;
   }
 
+  async allWithVectors(limit = 60): Promise<Array<{ memory: Memory; vector: number[] }>> {
+    const all: Array<{ memory: Memory; vector: number[] }> = [];
+    const perCategory = Math.ceil(limit / COLLECTIONS.length);
+
+    for (const category of COLLECTIONS) {
+      const result = await this.client.scroll(`memory_${category}`, {
+        limit: perCategory,
+        with_payload: true,
+        with_vector: true,
+      });
+
+      for (const point of result.points ?? []) {
+        const payload = point.payload as Record<string, unknown>;
+        const rawVector = point.vector;
+        if (!Array.isArray(rawVector)) continue;
+
+        const createdAt = String(payload.createdAt ?? '');
+        if (!createdAt) continue;
+
+        all.push({
+          memory: {
+            id: String(point.id),
+            category,
+            content: String(payload.content ?? ''),
+            metadata: (payload.metadata as Record<string, unknown>) ?? {},
+            source: (payload.source as Memory['source']) ?? 'agent',
+            createdAt,
+            updatedAt: String(payload.updatedAt ?? createdAt),
+          },
+          vector: rawVector as number[],
+        });
+      }
+    }
+
+    return all.slice(0, limit);
+  }
+
   async latest(limit = 5): Promise<Memory[]> {
     const all: Memory[] = [];
 
