@@ -22,6 +22,16 @@ const MAX_TOOL_REPEAT = Number(process.env.AGENT_TOOL_MAX_REPEAT ?? 2);
 const MAX_TOOL_TURNS = Number(process.env.AGENT_TOOL_MAX_TURNS ?? 4);
 const OLLAMA_TOOLS_ENABLED = String(process.env.AGENT_OLLAMA_TOOLS_ENABLED ?? 'false').toLowerCase() === 'true';
 const OLLAMA_GROUNDING_MODE = String(process.env.AGENT_OLLAMA_GROUNDING_MODE ?? 'warn').toLowerCase();
+const DELEGATION_TIMEOUT_MS = Number(process.env.AGENT_DELEGATION_TIMEOUT_MS ?? 120000);
+
+/**
+ * Minimal interface exposed to AgentCore for agent delegation.
+ * Defined here (not in registry.ts) to avoid a circular import.
+ */
+export interface AgentDelegateRegistry {
+  getByName(name: string): AgentCore | undefined;
+  list(): Array<{ row: { name: string; description: string | null }; active: boolean; providerName: string }>;
+}
 
 export interface AgentCoreOptions {
   retriever: MemoryRetriever;
@@ -33,6 +43,7 @@ export interface AgentCoreOptions {
   skillRegistry?: SkillRegistry;
   database?: ConversationDatabase;
   jobManager?: BackgroundJobManager;
+  agentRegistry?: AgentDelegateRegistry;
 }
 
 export class AgentCore {
@@ -46,6 +57,7 @@ export class AgentCore {
   private skillRegistry?: SkillRegistry;
   private database?: ConversationDatabase;
   private jobManager?: BackgroundJobManager;
+  private agentRegistry?: AgentDelegateRegistry;
   private auditLog: AuditEntry[] = []; // Keep last 100 in memory for quick access
   private startedAt = Date.now();
   private abortControllers = new Map<string, AbortController>();
@@ -60,11 +72,17 @@ export class AgentCore {
     this.skillRegistry = opts.skillRegistry;
     this.database = opts.database;
     this.jobManager = opts.jobManager;
+    this.agentRegistry = opts.agentRegistry;
   }
 
   /** Allow late injection of job manager (avoids circular dependency) */
   setJobManager(jobManager: BackgroundJobManager): void {
     this.jobManager = jobManager;
+  }
+
+  /** Allow late injection of agent registry (avoids circular dependency) */
+  setAgentRegistry(registry: AgentDelegateRegistry): void {
+    this.agentRegistry = registry;
   }
 
   get uptime(): number {
@@ -583,6 +601,32 @@ export class AgentCore {
       },
     ];
 
+    if (this.agentRegistry) {
+      tools.push(
+        {
+          name: 'agent_list',
+          description: 'List all available agents with their names, descriptions, and status.',
+          parameters: {
+            type: 'object',
+            properties: {},
+          },
+        },
+        {
+          name: 'delegate_to_agent',
+          description:
+            'Delegate a task or question to a specialized agent by name. The agent will process the task and return its response. Use agent_list first to discover available agents.',
+          parameters: {
+            type: 'object',
+            properties: {
+              agentName: { type: 'string', description: 'Name of the target agent to delegate to' },
+              task: { type: 'string', description: 'The full task or question for the target agent to handle' },
+            },
+            required: ['agentName', 'task'],
+          },
+        },
+      );
+    }
+
     return tools;
   }
 
@@ -876,6 +920,51 @@ export class AgentCore {
         }
 
         return { success: true, message: `Job ${jobId} cancelled` };
+      }
+
+      case 'agent_list': {
+        if (!this.agentRegistry) {
+          return { error: 'Agent delegation unavailable: agent registry not configured' };
+        }
+        const agents = this.agentRegistry.list().map((item) => ({
+          name: item.row.name,
+          description: item.row.description,
+          active: item.active,
+          providerName: item.providerName,
+        }));
+        return { count: agents.length, agents };
+      }
+
+      case 'delegate_to_agent': {
+        if (!this.agentRegistry) {
+          return { error: 'Agent delegation unavailable: agent registry not configured' };
+        }
+
+        const agentName = String(input.agentName ?? '').trim();
+        const task = String(input.task ?? '').trim();
+        if (!agentName || !task) {
+          return { error: 'Invalid input for delegate_to_agent: agentName and task are required' };
+        }
+
+        const target = this.agentRegistry.getByName(agentName);
+        if (!target) {
+          return { error: `Agent not found: ${agentName}` };
+        }
+
+        const callId = createId('delegate');
+        const delegateChannel: Channel = { type: 'internal', id: 'delegation' };
+        const sessionKey = `delegate:${callId}`;
+
+        try {
+          const result = await this.withTimeout(
+            target.chat(task, delegateChannel, sessionKey),
+            DELEGATION_TIMEOUT_MS,
+            `Delegation to agent "${agentName}" timed out after ${DELEGATION_TIMEOUT_MS}ms`,
+          );
+          return { agentName, result };
+        } catch (err: unknown) {
+          return { error: err instanceof Error ? err.message : String(err) };
+        }
       }
 
       default:
