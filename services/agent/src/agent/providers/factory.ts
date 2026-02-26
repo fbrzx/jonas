@@ -56,6 +56,24 @@ export class ProviderFactory {
   }
 
   /**
+   * Create a provider from a stored agent row's fields (no ProviderConfig needed).
+   */
+  static createForAgent(
+    opts: { provider: 'claude' | 'ollama'; claudeModel?: string | null; ollamaBaseUrl?: string | null; ollamaModel?: string | null },
+    claudeBin: string,
+    mcpConfigPath: string,
+  ): ModelProvider {
+    const config: ProviderConfig = {
+      provider: opts.provider,
+      claude: opts.claudeModel ? { model: opts.claudeModel } : undefined,
+      ollama: (opts.ollamaBaseUrl && opts.ollamaModel)
+        ? { baseUrl: opts.ollamaBaseUrl, model: opts.ollamaModel }
+        : undefined,
+    };
+    return ProviderFactory.create(config, claudeBin, mcpConfigPath);
+  }
+
+  /**
    * Create the appropriate provider based on configuration.
    *
    * @param config Provider configuration

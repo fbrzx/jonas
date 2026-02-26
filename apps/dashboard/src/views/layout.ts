@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { href: '/memory', label: 'Memory' },
   { href: '/skills', label: 'Skills' },
   { href: '/channels', label: 'Channels' },
+  { href: '/agents', label: 'Agents' },
   { href: '/tasks', label: 'Tasks' },
   { href: '/audit', label: 'Audit' },
 ];

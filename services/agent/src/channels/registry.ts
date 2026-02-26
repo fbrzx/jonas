@@ -285,6 +285,9 @@ export class ChannelRegistry {
     // Capture channel name for closures
     const channelName = channel.dirName;
 
+    // Resolve agentId from channel config (routes to a specific agent, if set)
+    const agentId = typeof config.agentId === 'string' ? config.agentId : undefined;
+
     // Create sendToAgent callback
     const sendToAgent = async (message: string, channelId: string): Promise<string> => {
       try {
@@ -300,6 +303,7 @@ export class ChannelRegistry {
             channelType: `channel:${channelName}`,
             channelId,
             sessionKey: `channel:${channelName}:${channelId}`,
+            ...(agentId ? { agentId } : {}),
           }),
         });
 
