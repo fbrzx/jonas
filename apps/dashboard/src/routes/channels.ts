@@ -67,15 +67,22 @@ function renderChannelRow(ch: PlatformChannel): string {
 
 function renderConfigSection(channel: PlatformChannel): string {
   const id = encodeURIComponent(channel.dirName);
-  const allKeys = channel.secretKeys ?? [];
+  const allVaultKeys = channel.secretKeys ?? [];
   const requiredSecrets = channel.config?.requiredSecrets ?? [];
   const optionalSecrets = channel.config?.optionalSecrets ?? [];
-  const allConfigKeys = [...requiredSecrets, ...optionalSecrets];
+
+  // Exclude internal __oauth_ keys from display
+  const userVaultKeys = allVaultKeys.filter((k) => !k.startsWith('__oauth_'));
+  // Merge declared keys + any custom vault keys; exclude oauth token keys
+  const oauthKeyNames = new Set(Object.keys(channel.config?.oauth ?? {}));
+  const allConfigKeys = [...new Set([...requiredSecrets, ...optionalSecrets, ...userVaultKeys])].filter(
+    (k) => !oauthKeyNames.has(k),
+  );
 
   // Per-key inline edit rows
   const keyRows = allConfigKeys.map((key) => {
     const isRequired = requiredSecrets.includes(key);
-    const isSet = allKeys.includes(key);
+    const isSet = userVaultKeys.includes(key);
     const statusBadge = isSet
       ? '<span class="badge badge--green">set</span>'
       : '<span class="badge badge--red">missing</span>';
