@@ -15,6 +15,7 @@ import auditRoutes from './routes/audit.js';
 import chatRoutes from './routes/chat.js';
 import oauthRoutes from './routes/oauth.js';
 import channelsRoutes from './routes/channels.js';
+import agentsRoutes from './routes/agents.js';
 import loginRoutes from './routes/login.js';
 import webhooksRoutes from './routes/webhooks.js';
 
@@ -204,6 +205,7 @@ app.route('/', memoryRoutes);
 app.route('/', extensionsRoutes);
 app.route('/', skillsRoutes);
 app.route('/', channelsRoutes);
+app.route('/', agentsRoutes);
 app.route('/', vaultRoutes);
 app.route('/', tasksRoutes);
 app.route('/', auditRoutes);

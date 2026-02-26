@@ -37,6 +37,21 @@ export interface AuditRow {
   createdAt?: string;
 }
 
+export interface AgentRow {
+  id: string;
+  name: string;
+  description: string | null;
+  provider: 'claude' | 'ollama';
+  claudeModel: string | null;
+  ollamaBaseUrl: string | null;
+  ollamaModel: string | null;
+  systemPromptOverride: string | null;
+  isDefault: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export class ConversationDatabase {
   private db: Database.Database;
 
@@ -94,6 +109,23 @@ export class ConversationDatabase {
       CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
       CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_key);
       CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+
+      CREATE TABLE IF NOT EXISTS agents (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        provider TEXT NOT NULL DEFAULT 'claude',
+        claude_model TEXT,
+        ollama_base_url TEXT,
+        ollama_model TEXT,
+        system_prompt_override TEXT,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
+      CREATE INDEX IF NOT EXISTS idx_agents_default ON agents(is_default);
     `);
 
     // Incremental migrations — safe to run on every startup
@@ -115,6 +147,122 @@ export class ConversationDatabase {
     } catch {
       // Index already exists
     }
+    // Add agent_id column to conversations
+    try {
+      this.db.exec('ALTER TABLE conversations ADD COLUMN agent_id TEXT');
+      log.info('Migration: added agent_id column to conversations');
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_conversations_agent_id ON conversations(agent_id)');
+    } catch {
+      // Index already exists
+    }
+  }
+
+  // ── Agent CRUD ────────────────────────────────────────────────────────────
+
+  createAgent(params: Omit<AgentRow, 'createdAt' | 'updatedAt'>): AgentRow {
+    const now = new Date().toISOString();
+    if (params.isDefault) {
+      this.db.prepare('UPDATE agents SET is_default = 0').run();
+    }
+    this.db.prepare(`
+      INSERT INTO agents (id, name, description, provider, claude_model, ollama_base_url, ollama_model, system_prompt_override, is_default, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      params.id, params.name, params.description ?? null,
+      params.provider, params.claudeModel ?? null, params.ollamaBaseUrl ?? null, params.ollamaModel ?? null,
+      params.systemPromptOverride ?? null, params.isDefault ? 1 : 0, params.enabled ? 1 : 0,
+      now, now,
+    );
+    return this.getAgent(params.id)!;
+  }
+
+  getAgent(id: string): AgentRow | null {
+    const row = this.db.prepare(`
+      SELECT id, name, description, provider,
+        claude_model as claudeModel, ollama_base_url as ollamaBaseUrl, ollama_model as ollamaModel,
+        system_prompt_override as systemPromptOverride,
+        is_default as isDefault, enabled, created_at as createdAt, updated_at as updatedAt
+      FROM agents WHERE id = ?
+    `).get(id) as (AgentRow & { isDefault: number; enabled: number }) | undefined;
+    return row ? this.coerceAgentRow(row) : null;
+  }
+
+  getAgentByName(name: string): AgentRow | null {
+    const row = this.db.prepare(`
+      SELECT id, name, description, provider,
+        claude_model as claudeModel, ollama_base_url as ollamaBaseUrl, ollama_model as ollamaModel,
+        system_prompt_override as systemPromptOverride,
+        is_default as isDefault, enabled, created_at as createdAt, updated_at as updatedAt
+      FROM agents WHERE name = ?
+    `).get(name) as (AgentRow & { isDefault: number; enabled: number }) | undefined;
+    return row ? this.coerceAgentRow(row) : null;
+  }
+
+  getDefaultAgent(): AgentRow | null {
+    const row = this.db.prepare(`
+      SELECT id, name, description, provider,
+        claude_model as claudeModel, ollama_base_url as ollamaBaseUrl, ollama_model as ollamaModel,
+        system_prompt_override as systemPromptOverride,
+        is_default as isDefault, enabled, created_at as createdAt, updated_at as updatedAt
+      FROM agents WHERE is_default = 1 LIMIT 1
+    `).get() as (AgentRow & { isDefault: number; enabled: number }) | undefined;
+    return row ? this.coerceAgentRow(row) : null;
+  }
+
+  listAgents(): AgentRow[] {
+    const rows = this.db.prepare(`
+      SELECT id, name, description, provider,
+        claude_model as claudeModel, ollama_base_url as ollamaBaseUrl, ollama_model as ollamaModel,
+        system_prompt_override as systemPromptOverride,
+        is_default as isDefault, enabled, created_at as createdAt, updated_at as updatedAt
+      FROM agents ORDER BY is_default DESC, created_at ASC
+    `).all() as Array<AgentRow & { isDefault: number; enabled: number }>;
+    return rows.map((r) => this.coerceAgentRow(r));
+  }
+
+  updateAgent(id: string, updates: Partial<Omit<AgentRow, 'id' | 'createdAt' | 'updatedAt'>>): AgentRow {
+    const existing = this.getAgent(id);
+    if (!existing) throw new Error(`Agent not found: ${id}`);
+    if (updates.isDefault) {
+      this.db.prepare('UPDATE agents SET is_default = 0').run();
+    }
+    const now = new Date().toISOString();
+    const merged = { ...existing, ...updates };
+    this.db.prepare(`
+      UPDATE agents SET
+        name = ?, description = ?, provider = ?,
+        claude_model = ?, ollama_base_url = ?, ollama_model = ?,
+        system_prompt_override = ?, is_default = ?, enabled = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      merged.name, merged.description ?? null, merged.provider,
+      merged.claudeModel ?? null, merged.ollamaBaseUrl ?? null, merged.ollamaModel ?? null,
+      merged.systemPromptOverride ?? null, merged.isDefault ? 1 : 0, merged.enabled ? 1 : 0,
+      now, id,
+    );
+    return this.getAgent(id)!;
+  }
+
+  deleteAgent(id: string): void {
+    this.db.prepare('DELETE FROM agents WHERE id = ?').run(id);
+  }
+
+  setDefaultAgent(id: string): void {
+    this.db.prepare('UPDATE agents SET is_default = 0').run();
+    this.db.prepare('UPDATE agents SET is_default = 1, updated_at = ? WHERE id = ?').run(new Date().toISOString(), id);
+  }
+
+  private coerceAgentRow(row: AgentRow & { isDefault: number | boolean; enabled: number | boolean }): AgentRow {
+    return {
+      ...row,
+      isDefault: Boolean(row.isDefault),
+      enabled: Boolean(row.enabled),
+    };
   }
 
   saveConversation(conv: ConversationRow): void {

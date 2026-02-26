@@ -2,8 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLogger } from '@jonas/shared/utils';
-import { AgentCore } from './agent/core.js';
-import { ProviderFactory } from './agent/providers/factory.js';
+import { AgentRegistry } from './agent/registry.js';
 import { MemoryClient } from './memory/client.js';
 import { EmbeddingClient } from './memory/embeddings.js';
 import { MemoryRetriever } from './memory/retriever.js';
@@ -140,27 +139,22 @@ async function main() {
   await pairingService.load();
   log.info('Channel pairing service loaded');
 
-  // Load model provider configuration and create provider
-  const modelConfigPath = '/data/model-config.json';
-  const providerConfig = await ProviderFactory.loadConfig(modelConfigPath);
-  const provider = ProviderFactory.create(providerConfig, claudeBin, mcpConfigPath);
-  log.info({ provider: provider.getName() }, 'Model provider initialized');
-
   // Initialize conversation database
   const dbPath = process.env.DB_PATH ?? '/data/conversations.db';
   const database = new ConversationDatabase(dbPath);
 
-  // Initialize agent core
-  const agent = new AgentCore({
+  // Initialize agent registry (replaces single agent + provider)
+  const agentRegistry = new AgentRegistry(database, {
     retriever,
     extractor,
     memory,
     embeddings,
-    provider,
-    mcpConfigPath,
     skillRegistry,
     database,
-  });
+  }, claudeBin, mcpConfigPath);
+  await agentRegistry.load();
+  const agent = agentRegistry.getDefault();
+  log.info({ agentCount: agentRegistry.size, provider: agent.getProviderName() }, 'Agent registry initialized');
 
   // Shared output dispatcher — sends task/job results to channels
   const dispatchOutput = async (channel: { type: string; id: string }, text: string): Promise<void> => {
@@ -183,8 +177,8 @@ async function main() {
   await jobManager.start();
   log.info('Background job manager started');
 
-  // Wire job manager into agent core (late injection to avoid circular deps)
-  agent.setJobManager(jobManager);
+  // Wire job manager into all agent cores (late injection to avoid circular deps)
+  agentRegistry.setJobManager(jobManager);
 
   // Initialize task scheduler
   const scheduler = new TaskScheduler({
@@ -197,7 +191,7 @@ async function main() {
   log.info('Task scheduler started');
 
   // Start internal API server
-  const api = createApiServer({ agent, memory, retriever, scheduler, jobManager, skillRegistry, oauthProviderStore, oauthHandler, database, channelRegistry, pairingService, connectionManager });
+  const api = createApiServer({ agent, agentRegistry, memory, retriever, scheduler, jobManager, skillRegistry, oauthProviderStore, oauthHandler, database, channelRegistry, pairingService, connectionManager });
   const port = Number(process.env.AGENT_PORT ?? 3001);
 
   const { serve } = await import('@hono/node-server');

@@ -16,11 +16,13 @@ import { ProviderFactory } from '../agent/providers/factory.js';
 import type { ProviderConfig } from '../agent/providers/base.js';
 import type { ChannelPairingService } from '../channels/pairing.js';
 import type { ConnectionManager } from '../connections/manager.js';
+import type { AgentRegistry } from '../agent/registry.js';
 
 const log = createLogger('api');
 
 interface ApiDeps {
   agent: AgentCore;
+  agentRegistry?: AgentRegistry;
   memory: MemoryClient;
   retriever: MemoryRetriever;
   scheduler?: TaskScheduler;
@@ -233,6 +235,7 @@ export function createApiServer(deps: ApiDeps) {
       sessionKey?: string;
       channelType?: string;
       channelId?: string;
+      agentId?: string;
     }>();
 
     const channel = {
@@ -251,8 +254,10 @@ export function createApiServer(deps: ApiDeps) {
       }, 403);
     }
 
+    const targetAgent = deps.agentRegistry?.resolve(body.agentId) ?? deps.agent;
+
     try {
-      const response = await deps.agent.chat(
+      const response = await targetAgent.chat(
         body.message,
         channel,
         body.sessionKey
@@ -311,6 +316,7 @@ export function createApiServer(deps: ApiDeps) {
       sessionKey?: string;
       channelType?: string;
       channelId?: string;
+      agentId?: string;
     }>();
 
     const channel = {
@@ -329,6 +335,8 @@ export function createApiServer(deps: ApiDeps) {
       }, 403);
     }
 
+    const targetAgent = deps.agentRegistry?.resolve(body.agentId) ?? deps.agent;
+
     return new Response(
       new ReadableStream({
         async start(controller) {
@@ -340,7 +348,7 @@ export function createApiServer(deps: ApiDeps) {
           send('thinking', { status: 'thinking' });
 
           try {
-            const response = await deps.agent.chat(
+            const response = await targetAgent.chat(
               body.message,
               channel,
               body.sessionKey,
@@ -1189,6 +1197,112 @@ export function createApiServer(deps: ApiDeps) {
       const msg = err instanceof Error ? err.message : 'Failed to update channel source';
       return c.json({ error: msg }, 500);
     }
+  });
+
+  // --- Agent management endpoints ---
+
+  app.get('/api/agents', (c) => {
+    if (!deps.agentRegistry) return c.json({ error: 'Agent registry not available' }, 503);
+    return c.json({ agents: deps.agentRegistry.list() });
+  });
+
+  app.post('/api/agents', async (c) => {
+    if (!deps.agentRegistry) return c.json({ error: 'Agent registry not available' }, 503);
+    try {
+      const body = await c.req.json<{
+        name: string;
+        description?: string;
+        provider: 'claude' | 'ollama';
+        claudeModel?: string;
+        ollamaBaseUrl?: string;
+        ollamaModel?: string;
+        systemPromptOverride?: string;
+        isDefault?: boolean;
+        enabled?: boolean;
+      }>();
+      if (!body.name || !body.provider) {
+        return c.json({ error: 'Missing required fields: name, provider' }, 400);
+      }
+      if (!['claude', 'ollama'].includes(body.provider)) {
+        return c.json({ error: 'Invalid provider. Must be "claude" or "ollama"' }, 400);
+      }
+      const row = await deps.agentRegistry.addAgent(body);
+      return c.json(row, 201);
+    } catch (err) {
+      log.error(err, 'Failed to create agent');
+      const msg = err instanceof Error ? err.message : 'Failed to create agent';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  app.get('/api/agents/:id', (c) => {
+    if (!deps.agentRegistry) return c.json({ error: 'Agent registry not available' }, 503);
+    const id = c.req.param('id');
+    const items = deps.agentRegistry.list();
+    const item = items.find((a) => a.row.id === id);
+    if (!item) return c.json({ error: 'Agent not found' }, 404);
+    return c.json(item);
+  });
+
+  app.put('/api/agents/:id', async (c) => {
+    if (!deps.agentRegistry) return c.json({ error: 'Agent registry not available' }, 503);
+    const id = c.req.param('id');
+    try {
+      const updates = await c.req.json<Partial<{
+        name: string;
+        description: string;
+        provider: 'claude' | 'ollama';
+        claudeModel: string;
+        ollamaBaseUrl: string;
+        ollamaModel: string;
+        systemPromptOverride: string;
+        isDefault: boolean;
+        enabled: boolean;
+      }>>();
+      const row = await deps.agentRegistry.updateAgent(id, updates);
+      return c.json(row);
+    } catch (err) {
+      log.error(err, 'Failed to update agent');
+      const msg = err instanceof Error ? err.message : 'Failed to update agent';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  app.delete('/api/agents/:id', async (c) => {
+    if (!deps.agentRegistry) return c.json({ error: 'Agent registry not available' }, 503);
+    const id = c.req.param('id');
+    try {
+      await deps.agentRegistry.deleteAgent(id);
+      return c.json({ success: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete agent';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  app.post('/api/agents/:id/set-default', async (c) => {
+    if (!deps.agentRegistry) return c.json({ error: 'Agent registry not available' }, 503);
+    const id = c.req.param('id');
+    try {
+      await deps.agentRegistry.setDefault(id);
+      return c.json({ success: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to set default agent';
+      return c.json({ error: msg }, 400);
+    }
+  });
+
+  app.get('/api/agents/:id/status', (c) => {
+    if (!deps.agentRegistry) return c.json({ error: 'Agent registry not available' }, 503);
+    const id = c.req.param('id');
+    const core = deps.agentRegistry.getById(id);
+    if (!core) return c.json({ error: 'Agent not found or not active' }, 404);
+    return c.json({
+      id,
+      providerName: core.getProviderName(),
+      uptime: core.uptime,
+      activeConversations: core.activeConversationCount,
+    });
   });
 
   return app;
