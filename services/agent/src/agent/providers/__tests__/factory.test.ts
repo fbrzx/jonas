@@ -135,4 +135,35 @@ describe('ProviderFactory', () => {
       expect(provider).toBeInstanceOf(ClaudeProvider);
     });
   });
+
+  describe('createForAgent', () => {
+    it('creates a ClaudeProvider from an agent row', () => {
+      const provider = ProviderFactory.createForAgent(
+        { provider: 'claude', claudeModel: 'claude-opus-4-6' },
+        '/claude',
+        '/mcp.json',
+      );
+      expect(provider).toBeInstanceOf(ClaudeProvider);
+      expect(provider.getName()).toContain('claude-opus-4-6');
+    });
+
+    it('creates an OllamaProvider from an agent row', () => {
+      const provider = ProviderFactory.createForAgent(
+        { provider: 'ollama', ollamaBaseUrl: 'http://localhost:11434', ollamaModel: 'llama3.2' },
+        '/claude',
+        '/mcp.json',
+      );
+      expect(provider).toBeInstanceOf(OllamaProvider);
+      expect(provider.getName()).toBe('ollama:llama3.2');
+    });
+
+    it('falls back to default Claude model when claudeModel is null', () => {
+      const provider = ProviderFactory.createForAgent(
+        { provider: 'claude', claudeModel: null },
+        '/claude',
+        '/mcp.json',
+      );
+      expect(provider).toBeInstanceOf(ClaudeProvider);
+    });
+  });
 });
