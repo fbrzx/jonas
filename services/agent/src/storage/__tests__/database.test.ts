@@ -253,4 +253,146 @@ describe('ConversationDatabase', () => {
       expect(db2.getAuditLogs()[0].jobId).toBe('j2');
     });
   });
+
+  describe('agents', () => {
+    let db: ConversationDatabase;
+    beforeEach(() => { db = makeDb(); });
+
+    const baseAgent = () => ({
+      id: 'agent_1',
+      name: 'default',
+      description: 'Test agent',
+      provider: 'claude' as const,
+      claudeModel: 'claude-sonnet-4-6',
+      ollamaBaseUrl: null,
+      ollamaModel: null,
+      systemPromptOverride: null,
+      isDefault: true,
+      enabled: true,
+    });
+
+    it('creates and retrieves an agent by id', () => {
+      db.createAgent(baseAgent());
+      const row = db.getAgent('agent_1');
+      expect(row).not.toBeNull();
+      expect(row!.name).toBe('default');
+      expect(row!.provider).toBe('claude');
+      expect(row!.claudeModel).toBe('claude-sonnet-4-6');
+      expect(row!.isDefault).toBe(true);
+      expect(row!.enabled).toBe(true);
+    });
+
+    it('isDefault and enabled are booleans (not integers)', () => {
+      db.createAgent(baseAgent());
+      const row = db.getAgent('agent_1')!;
+      expect(typeof row.isDefault).toBe('boolean');
+      expect(typeof row.enabled).toBe('boolean');
+    });
+
+    it('returns null for unknown id', () => {
+      expect(db.getAgent('nonexistent')).toBeNull();
+    });
+
+    it('retrieves an agent by name', () => {
+      db.createAgent(baseAgent());
+      const row = db.getAgentByName('default');
+      expect(row).not.toBeNull();
+      expect(row!.id).toBe('agent_1');
+    });
+
+    it('returns null for unknown name', () => {
+      expect(db.getAgentByName('ghost')).toBeNull();
+    });
+
+    it('listAgents returns all agents, default first', () => {
+      db.createAgent({ ...baseAgent(), isDefault: false, id: 'agent_2', name: 'secondary' });
+      db.createAgent({ ...baseAgent(), id: 'agent_1', name: 'default', isDefault: true });
+      const rows = db.listAgents();
+      expect(rows).toHaveLength(2);
+      expect(rows[0].isDefault).toBe(true);
+    });
+
+    it('getDefaultAgent returns the one marked default', () => {
+      db.createAgent({ ...baseAgent(), isDefault: false, id: 'agent_2', name: 'other' });
+      db.createAgent({ ...baseAgent(), id: 'agent_1', name: 'default', isDefault: true });
+      const row = db.getDefaultAgent();
+      expect(row).not.toBeNull();
+      expect(row!.id).toBe('agent_1');
+    });
+
+    it('getDefaultAgent returns null when none are default', () => {
+      db.createAgent({ ...baseAgent(), isDefault: false });
+      expect(db.getDefaultAgent()).toBeNull();
+    });
+
+    it('creating a second default agent clears the first', () => {
+      db.createAgent({ ...baseAgent(), id: 'agent_1', name: 'first', isDefault: true });
+      db.createAgent({ ...baseAgent(), id: 'agent_2', name: 'second', isDefault: true });
+      const first = db.getAgent('agent_1')!;
+      const second = db.getAgent('agent_2')!;
+      expect(first.isDefault).toBe(false);
+      expect(second.isDefault).toBe(true);
+    });
+
+    it('updateAgent merges changes', () => {
+      db.createAgent(baseAgent());
+      db.updateAgent('agent_1', { claudeModel: 'claude-opus-4-6', description: 'Updated' });
+      const row = db.getAgent('agent_1')!;
+      expect(row.claudeModel).toBe('claude-opus-4-6');
+      expect(row.description).toBe('Updated');
+      expect(row.name).toBe('default'); // unchanged
+    });
+
+    it('updateAgent throws for unknown id', () => {
+      expect(() => db.updateAgent('ghost', { name: 'x' })).toThrow('Agent not found: ghost');
+    });
+
+    it('deleteAgent removes the record', () => {
+      db.createAgent(baseAgent());
+      db.deleteAgent('agent_1');
+      expect(db.getAgent('agent_1')).toBeNull();
+      expect(db.listAgents()).toHaveLength(0);
+    });
+
+    it('setDefaultAgent clears previous default and sets new one', () => {
+      db.createAgent({ ...baseAgent(), id: 'agent_1', name: 'a', isDefault: true });
+      db.createAgent({ ...baseAgent(), id: 'agent_2', name: 'b', isDefault: false });
+      db.setDefaultAgent('agent_2');
+      expect(db.getAgent('agent_1')!.isDefault).toBe(false);
+      expect(db.getAgent('agent_2')!.isDefault).toBe(true);
+    });
+
+    it('stores and retrieves Ollama agent fields', () => {
+      db.createAgent({
+        id: 'agent_3',
+        name: 'local',
+        description: null,
+        provider: 'ollama',
+        claudeModel: null,
+        ollamaBaseUrl: 'http://localhost:11434',
+        ollamaModel: 'qwen2.5-coder:latest',
+        systemPromptOverride: null,
+        isDefault: false,
+        enabled: true,
+      });
+      const row = db.getAgent('agent_3')!;
+      expect(row.provider).toBe('ollama');
+      expect(row.ollamaBaseUrl).toBe('http://localhost:11434');
+      expect(row.ollamaModel).toBe('qwen2.5-coder:latest');
+      expect(row.claudeModel).toBeNull();
+    });
+
+    it('stores systemPromptOverride', () => {
+      db.createAgent({ ...baseAgent(), systemPromptOverride: 'Always reply in JSON.' });
+      const row = db.getAgent('agent_1')!;
+      expect(row.systemPromptOverride).toBe('Always reply in JSON.');
+    });
+
+    it('disabled agents appear in listAgents but with enabled=false', () => {
+      db.createAgent({ ...baseAgent(), enabled: false });
+      const rows = db.listAgents();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].enabled).toBe(false);
+    });
+  });
 });
