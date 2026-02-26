@@ -6,7 +6,7 @@
  */
 
 import { createLogger, createId, isoNow } from '@jonas/shared/utils';
-import { AgentCore, type AgentCoreOptions } from './core.js';
+import { AgentCore, type AgentCoreOptions, type AgentDelegateRegistry } from './core.js';
 import { ProviderFactory } from './providers/factory.js';
 import type { ConversationDatabase, AgentRow } from '../storage/database.js';
 import type { MemoryRetriever } from '../memory/retriever.js';
@@ -78,7 +78,7 @@ export class AgentRegistry {
 
   private createCore(row: AgentRow): AgentCore {
     const provider = ProviderFactory.createForAgent(row, this.claudeBin, this.mcpConfigPath);
-    return new AgentCore({
+    const core = new AgentCore({
       retriever: this.shared.retriever,
       extractor: this.shared.extractor,
       memory: this.shared.memory,
@@ -88,6 +88,8 @@ export class AgentRegistry {
       provider,
       mcpConfigPath: this.mcpConfigPath,
     } satisfies AgentCoreOptions);
+    core.setAgentRegistry(this as unknown as AgentDelegateRegistry);
+    return core;
   }
 
   private async seedFromLegacyConfig(): Promise<void> {
@@ -120,6 +122,13 @@ export class AgentRegistry {
 
   getById(id: string): AgentCore | undefined {
     return this.entries.get(id)?.core;
+  }
+
+  getByName(name: string): AgentCore | undefined {
+    for (const entry of this.entries.values()) {
+      if (entry.row.name === name) return entry.core;
+    }
+    return undefined;
   }
 
   /** Resolve agentId → AgentCore, falling back to default. */
@@ -196,7 +205,7 @@ export class AgentRegistry {
 
     if (row.enabled) {
       if (!existing || providerChanged) {
-        // Create or recreate core with new provider
+        // Create or recreate core with new provider (registry injected inside createCore)
         const core = this.createCore(row);
         // Preserve job manager if already set
         const jm = (existing?.core as any)?._jobManager;
