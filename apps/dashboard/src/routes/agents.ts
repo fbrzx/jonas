@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { layout } from '../views/layout.js';
 
 const app = new Hono();
@@ -398,7 +398,7 @@ app.put('/agents/:id', async (c) => {
   }
 });
 
-async function reloadList(c: Parameters<typeof app.get>[1] extends (c: infer C, ...args: unknown[]) => unknown ? C : never): Promise<Response> {
+async function reloadList(c: Context): Promise<Response> {
   let items: AgentListItem[] = [];
   try {
     const res = await fetch(`${AGENT_API_URL}/api/agents`);
