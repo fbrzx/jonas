@@ -952,7 +952,7 @@ export class AgentCore {
         }
 
         const callId = createId('delegate');
-        const delegateChannel: Channel = { type: 'internal', id: 'delegation' };
+        const delegateChannel: Channel = { type: 'api', id: 'delegation' };
         const sessionKey = `delegate:${callId}`;
 
         try {
