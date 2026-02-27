@@ -1117,6 +1117,83 @@ server.tool(
   },
 );
 
+// --- Agent delegation tools ---
+
+server.tool(
+  'agent_list',
+  'List all available agents with their names, descriptions, provider, and active status. Call this before delegate_to_agent to discover which agents exist.',
+  {},
+  async () => {
+    const res = await apiFetch('/api/agents');
+    const data = await res.json() as {
+      agents?: Array<{
+        row: { id: string; name: string; description: string | null; provider: string; isDefault: boolean; enabled: boolean };
+        active: boolean;
+        providerName: string;
+      }>;
+      error?: string;
+    };
+    if (!res.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: data.error ?? 'Failed to list agents' }) }], isError: true };
+    }
+    const agents = (data.agents ?? []).map(item => ({
+      name: item.row.name,
+      description: item.row.description,
+      provider: item.row.provider,
+      active: item.active,
+      isDefault: item.row.isDefault,
+      enabled: item.row.enabled,
+    }));
+    return { content: [{ type: 'text', text: JSON.stringify({ count: agents.length, agents }) }] };
+  },
+);
+
+server.tool(
+  'delegate_to_agent',
+  'Delegate a task or question to a specialized agent by name. The agent will process the task synchronously and return its response. Use agent_list first to discover available agents.',
+  {
+    agentName: z.string().describe('Name of the target agent (from agent_list)'),
+    task: z.string().describe('The full task or question for the target agent to handle'),
+  },
+  async ({ agentName, task }) => {
+    // Resolve agent name → ID
+    const listRes = await apiFetch('/api/agents');
+    if (!listRes.ok) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Failed to reach agent registry' }) }], isError: true };
+    }
+    const listData = await listRes.json() as {
+      agents?: Array<{ row: { id: string; name: string; enabled: boolean } }>;
+    };
+    const match = (listData.agents ?? []).find(a => a.row.name === agentName);
+    if (!match) {
+      const names = (listData.agents ?? []).map(a => a.row.name).join(', ');
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: `Agent not found: "${agentName}". Available: ${names}` }) }],
+        isError: true,
+      };
+    }
+    if (!match.row.enabled) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: `Agent "${agentName}" is disabled` }) }], isError: true };
+    }
+
+    // Delegate via the chat API with an isolated session
+    const sessionKey = `mcp-delegate:${agentName}:${Date.now()}`;
+    const chatRes = await apiFetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: task, agentId: match.row.id, sessionKey }),
+    });
+    const chatData = await chatRes.json() as { response?: string; error?: string };
+    if (!chatRes.ok) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: chatData.error ?? 'Delegation failed' }) }],
+        isError: true,
+      };
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({ agentName, result: chatData.response }) }] };
+  },
+);
+
 // Start
 const transport = new StdioServerTransport();
 await server.connect(transport);
