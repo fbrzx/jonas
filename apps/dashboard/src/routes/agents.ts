@@ -160,8 +160,8 @@ app.get('/agents', async (c) => {
     ${errorMsg ? `<p class="badge badge--red">${errorMsg}</p>` : ''}
 
     <div class="info-box">
-      Each agent has its own model configuration. Channels can be assigned a specific agent;
-      the <strong>default</strong> agent handles all unassigned channels.
+      Each agent has its own model configuration. Tasks can be assigned a specific agent;
+      the <strong>default</strong> agent coordinates the work, ensuring all tasks are managed efficiently.
     </div>
 
     ${renderAgentList(items)}

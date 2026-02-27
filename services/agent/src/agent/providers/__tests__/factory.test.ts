@@ -24,7 +24,7 @@ describe('ProviderFactory', () => {
       const config = await ProviderFactory.loadConfig('/nonexistent/path.json');
 
       expect(config.provider).toBe('claude');
-      expect(config.claude?.model).toBe('claude-sonnet-4-5-20250929');
+      expect(config.claude?.model).toBe('claude-sonnet-4-6');
     });
 
     it('should load config from file when it exists', async () => {

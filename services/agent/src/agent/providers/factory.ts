@@ -40,7 +40,7 @@ export class ProviderFactory {
     const claudeModel = fileConfig?.claude?.model
       ?? process.env.CLAUDE_MODEL
       ?? process.env.AGENT_DEFAULT_MODEL
-      ?? 'claude-sonnet-4-5-20250929';
+      ?? 'claude-sonnet-4-6';
 
     const ollamaBaseUrl = fileConfig?.ollama?.baseUrl ?? process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
     const ollamaModel = fileConfig?.ollama?.model ?? process.env.OLLAMA_MODEL ?? 'qwen2.5-coder:latest';
@@ -92,6 +92,6 @@ export class ProviderFactory {
 
     // Default to Claude
     log.info({ claudeBin, model: config.claude?.model }, 'Creating Claude provider');
-    return new ClaudeProvider(claudeBin, mcpConfigPath, config.claude?.model ?? 'claude-sonnet-4-5-20250929');
+    return new ClaudeProvider(claudeBin, mcpConfigPath, config.claude?.model ?? 'claude-sonnet-4-6');
   }
 }

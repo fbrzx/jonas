@@ -27,7 +27,7 @@ Jonas supports two model providers:
 Uses Claude Pro via OAuth token and the Claude Code CLI:
 ```bash
 MODEL_PROVIDER=claude
-CLAUDE_MODEL=claude-sonnet-4-5-20250929
+CLAUDE_MODEL=claude-sonnet-4-6
 ```
 
 ### Ollama (local models)

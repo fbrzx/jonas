@@ -9,7 +9,7 @@ services:
       - VOYAGE_API_KEY=${VOYAGE_API_KEY}
       - QDRANT_URL=http://qdrant:6333
       - AGENT_PORT=3001
-      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-5-20250929}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-sonnet-4-6}
       - AGENT_MAX_ACTIONS_PER_MINUTE=${AGENT_MAX_ACTIONS_PER_MINUTE:-30}
       - AGENT_API_TOKEN=${AGENT_API_TOKEN}
       - VAULT_PATH=/data/vault

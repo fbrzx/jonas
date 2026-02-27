@@ -201,7 +201,7 @@ OLLAMA_MODEL=qwen2.5-coder:7b
 ```bash
 # Use Claude for production quality
 MODEL_PROVIDER=claude
-CLAUDE_MODEL=claude-sonnet-4-5-20250929
+CLAUDE_MODEL=claude-sonnet-4-6
 ```
 
 ### Hybrid Setup

@@ -16,7 +16,7 @@ interface OllamaModelList {
 
 function renderConfigForm(config: ModelConfig, ollamaModels?: OllamaModelList): string {
   const isOllama = config.provider === 'ollama';
-  const claudeModel = config.claude?.model ?? 'claude-sonnet-4-5-20250929';
+  const claudeModel = config.claude?.model ?? 'claude-sonnet-4-6';
   const ollamaBaseUrl = config.ollama?.baseUrl ?? 'http://localhost:11434';
   const ollamaModel = config.ollama?.model ?? 'qwen2.5-coder:latest';
 
@@ -83,8 +83,8 @@ function renderClaudeForm(model: string): string {
   return `
     <div class="form-group">
       <label for="claude-model"><strong>Claude Model</strong></label>
-      <input type="text" id="claude-model" name="claudeModel" value="${model}" placeholder="claude-sonnet-4-5-20250929">
-      <small>Enter the Claude model ID (e.g., claude-sonnet-4-5-20250929)</small>
+      <input type="text" id="claude-model" name="claudeModel" value="${model}" placeholder="claude-sonnet-4-6">
+      <small>Enter the Claude model ID (e.g., claude-sonnet-4-6)</small>
     </div>
   `;
 }
@@ -166,7 +166,7 @@ app.get('/form', async (c) => {
       const ollamaModel = config.ollama?.model ?? 'qwen2.5-coder:latest';
       return c.html(renderOllamaForm(ollamaBaseUrl, ollamaModel));
     } else {
-      const claudeModel = config.claude?.model ?? 'claude-sonnet-4-5-20250929';
+      const claudeModel = config.claude?.model ?? 'claude-sonnet-4-6';
       return c.html(renderClaudeForm(claudeModel));
     }
   } catch {
