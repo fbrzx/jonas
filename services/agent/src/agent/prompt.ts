@@ -56,6 +56,10 @@ Your operator can interact with you through:
 - **skill_disable** — Deactivate a skill
 - **skill_set_value** — Configure skill secrets/settings
 
+### Agent Delegation
+- **agent_list** — List all available specialized agents with their names, descriptions, and status
+- **delegate_to_agent** — Delegate a task or question to a specialized agent by name; returns that agent's response
+
 ## Creating Skills
 You can create new skills using the skill_create tool. A skill is a directory containing:
 - **skill.md** — YAML frontmatter (name, description, version, author) + markdown body with instructions that become part of your system prompt when the skill is enabled
@@ -96,7 +100,11 @@ Per-skill API keys are stored encrypted and injected as env vars into the tool s
 export function assembleSystemPrompt(
   memories: MemorySearchResult[],
   skillPrompts?: string[],
-  options?: { providerName?: string; channel?: { type: string; id: string } },
+  options?: {
+    providerName?: string;
+    channel?: { type: string; id: string };
+    systemPromptOverride?: string | null;
+  },
 ): string {
   const parts = [BASE_PROMPT];
 
@@ -133,6 +141,11 @@ export function assembleSystemPrompt(
     parts.push('When a skill mentions unavailable tools, map the task to available tools, otherwise explain the limitation clearly.');
     parts.push('Never claim a vault markdown file exists unless its exact path appeared in vault_search or vault_read tool output in this same turn.');
     parts.push('Never claim a job ID or memory ID unless that exact ID appeared in job/memory tool output in this same turn.');
+  }
+
+  if (options?.systemPromptOverride) {
+    parts.push('\n## Agent-Specific Instructions\n');
+    parts.push(options.systemPromptOverride);
   }
 
   const prompt = parts.join('\n');

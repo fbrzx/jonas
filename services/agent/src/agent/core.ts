@@ -44,6 +44,7 @@ export interface AgentCoreOptions {
   database?: ConversationDatabase;
   jobManager?: BackgroundJobManager;
   agentRegistry?: AgentDelegateRegistry;
+  systemPromptOverride?: string | null;
 }
 
 export class AgentCore {
@@ -61,6 +62,7 @@ export class AgentCore {
   private auditLog: AuditEntry[] = []; // Keep last 100 in memory for quick access
   private startedAt = Date.now();
   private abortControllers = new Map<string, AbortController>();
+  private systemPromptOverride: string | null = null;
 
   constructor(opts: AgentCoreOptions) {
     this.retriever = opts.retriever;
@@ -73,6 +75,7 @@ export class AgentCore {
     this.database = opts.database;
     this.jobManager = opts.jobManager;
     this.agentRegistry = opts.agentRegistry;
+    this.systemPromptOverride = opts.systemPromptOverride ?? null;
   }
 
   /** Allow late injection of job manager (avoids circular dependency) */
@@ -83,6 +86,11 @@ export class AgentCore {
   /** Allow late injection of agent registry (avoids circular dependency) */
   setAgentRegistry(registry: AgentDelegateRegistry): void {
     this.agentRegistry = registry;
+  }
+
+  /** Update system prompt override without recreating the core. */
+  setSystemPromptOverride(override: string | null): void {
+    this.systemPromptOverride = override;
   }
 
   get uptime(): number {
@@ -173,6 +181,7 @@ export class AgentCore {
     const systemPrompt = assembleSystemPrompt(memories, skillPrompts, {
       providerName: this.provider.getName(),
       channel,
+      systemPromptOverride: this.systemPromptOverride,
     });
 
     // Rebuild MCP config with current skill servers

@@ -73,7 +73,7 @@ function renderAgentCard(item: AgentListItem): string {
               Set Default
             </button>
           ` : ''}
-          <button class="btn btn--sm btn--primary" onclick="openEditModal(${JSON.stringify(row)})">Edit</button>
+          <button class="btn btn--sm btn--primary" onclick="openEditModal(${escHtml(JSON.stringify(row))})">Edit</button>
           ${!isDefault ? `
             <button class="btn btn--sm btn--danger"
                     hx-delete="/agents/${row.id}"
@@ -209,6 +209,11 @@ app.get('/agents', async (c) => {
           </div>
 
           <div class="form-group" style="display:flex;align-items:center;gap:0.5rem">
+            <input type="checkbox" id="edit-enabled" name="enabled" style="width:auto" checked>
+            <label for="edit-enabled" style="margin:0">Enabled</label>
+          </div>
+
+          <div class="form-group" style="display:flex;align-items:center;gap:0.5rem">
             <input type="checkbox" id="edit-is-default" name="isDefault" style="width:auto">
             <label for="edit-is-default" style="margin:0">Set as default agent</label>
           </div>
@@ -242,6 +247,7 @@ app.get('/agents', async (c) => {
         document.querySelectorAll('[name="provider"]').forEach(r => {
           r.checked = r.value === 'claude';
         });
+        document.getElementById('edit-enabled').checked = true;
         document.getElementById('agent-form-result').innerHTML = '';
         modal.removeAttribute('hidden');
       }
@@ -254,6 +260,7 @@ app.get('/agents', async (c) => {
         document.getElementById('edit-name').value = row.name;
         document.getElementById('edit-desc').value = row.description || '';
         document.getElementById('edit-system-prompt').value = row.systemPromptOverride || '';
+        document.getElementById('edit-enabled').checked = row.enabled;
         document.getElementById('edit-is-default').checked = row.isDefault;
 
         document.querySelectorAll('[name="provider"]').forEach(r => {
@@ -290,6 +297,7 @@ app.get('/agents', async (c) => {
           description: form.querySelector('[name="description"]').value.trim() || null,
           provider,
           systemPromptOverride: form.querySelector('[name="systemPromptOverride"]').value.trim() || null,
+          enabled: form.querySelector('[name="enabled"]').checked,
           isDefault: form.querySelector('[name="isDefault"]').checked,
         };
 

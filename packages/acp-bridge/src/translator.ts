@@ -30,7 +30,7 @@ export class GatewayTranslator {
 
     if (frame.type === 'evt') {
       const evt = frame as GatewayEvent;
-      if (evt.event === 'chat') {
+      if (evt.event === 'chat.stream') {
         const payload = evt.payload;
         switch (payload.kind) {
           case 'delta':

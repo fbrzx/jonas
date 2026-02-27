@@ -87,6 +87,7 @@ export class AgentRegistry {
       database: this.shared.database,
       provider,
       mcpConfigPath: this.mcpConfigPath,
+      systemPromptOverride: row.systemPromptOverride,
     } satisfies AgentCoreOptions);
     core.setAgentRegistry(this as unknown as AgentDelegateRegistry);
     return core;
@@ -214,6 +215,10 @@ export class AgentRegistry {
       } else {
         // Just update the row metadata
         existing.row = row;
+        // Propagate system prompt override change to the running core
+        if (updates.systemPromptOverride !== undefined) {
+          existing.core.setSystemPromptOverride(row.systemPromptOverride);
+        }
       }
     } else if (existing) {
       // Agent was disabled — remove from active entries
