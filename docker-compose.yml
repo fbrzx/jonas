@@ -22,6 +22,23 @@ services:
       - MODEL_PROVIDER=${MODEL_PROVIDER:-claude}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5-coder:latest}
+      # --- Multi-agent swarm tuning (Jonas/Sonnet, Gandalf/Opus, Lucy/Haiku) ---
+      # Opus needs longer model turns; 3min accommodates deep reasoning
+      - AGENT_MODEL_TURN_TIMEOUT_MS_CLAUDE=${AGENT_MODEL_TURN_TIMEOUT_MS_CLAUDE:-180000}
+      # Let agents chain more tools per turn (Opus benefits most)
+      - AGENT_TOOL_MAX_TURNS=${AGENT_TOOL_MAX_TURNS:-6}
+      - AGENT_TOOL_MAX_REPEAT=${AGENT_TOOL_MAX_REPEAT:-3}
+      - AGENT_TOOL_TIMEOUT_MS=${AGENT_TOOL_TIMEOUT_MS:-20000}
+      # More concurrent jobs — Haiku is cheap, Sonnet delegations overlap
+      - AGENT_MAX_CONCURRENT_JOBS=${AGENT_MAX_CONCURRENT_JOBS:-8}
+      # 3-tier delegation: Jonas(Sonnet) → Gandalf(Opus) → Lucy(Haiku)
+      - AGENT_MAX_DELEGATION_DEPTH=${AGENT_MAX_DELEGATION_DEPTH:-3}
+      # Richer context for Opus; acceptable overhead for Haiku
+      - AGENT_MAX_TOOL_RESULT_CHARS=${AGENT_MAX_TOOL_RESULT_CHARS:-6000}
+      - AGENT_MAX_HISTORY_MSG_CHARS=${AGENT_MAX_HISTORY_MSG_CHARS:-1500}
+      # Job system (delegation routes here now)
+      - AGENT_JOB_TIMEOUT_MS=${AGENT_JOB_TIMEOUT_MS:-600000}
+      - AGENT_JOB_HISTORY_SIZE=${AGENT_JOB_HISTORY_SIZE:-200}
     volumes:
       - ./.volumes/agent-data:/data
       # Optional: mount host Claude Code skills dir for bidirectional sync
