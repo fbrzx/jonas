@@ -8,6 +8,8 @@ import type { ModelProvider, QueryOptions, QueryResult } from './base.js';
 
 const log = createLogger('provider-claude');
 
+const CLAUDE_MAX_TURNS = Number(process.env.CLAUDE_MAX_TURNS ?? 30);
+
 interface CliResult {
   type: string;
   subtype: string;
@@ -38,7 +40,7 @@ export class ClaudeProvider implements ModelProvider {
         '--print',
         '--output-format', 'json',
         '--model', model,
-        '--max-turns', '10',
+        '--max-turns', String(CLAUDE_MAX_TURNS),
         '--system-prompt', opts.systemPrompt,
         '--permission-mode', 'bypassPermissions',
         '--mcp-config', this.mcpConfigPath,
@@ -75,6 +77,11 @@ export class ClaudeProvider implements ModelProvider {
           if (result.is_error) {
             log.error({ result: result.result }, 'Claude CLI returned error');
             reject(new Error(result.result));
+            return;
+          }
+          if (!result.result?.trim()) {
+            log.warn({ duration: result.duration_ms }, 'Claude CLI returned empty result — max-turns likely exhausted');
+            reject(new Error(`Claude reached the turn limit (${CLAUDE_MAX_TURNS}) without producing a final response. Try breaking the task into smaller steps or use job_run for complex long-running tasks.`));
             return;
           }
           log.info({ duration: result.duration_ms }, 'Claude CLI response received');

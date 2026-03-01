@@ -1183,6 +1183,11 @@ export class AgentCore {
   private categorizeError(message: string): string {
     const lower = message.toLowerCase();
 
+    // Turn limit exhaustion (Claude CLI max-turns reached without final response)
+    if (lower.includes('turn limit') || lower.includes('max-turns') || (lower.includes('turn') && lower.includes('final response'))) {
+      return 'The task required too many steps and hit the internal turn limit. Try breaking it into smaller steps, or ask me to use job_run to run it as a long-running background task.';
+    }
+
     // Token/context length errors
     if (lower.includes('context') && (lower.includes('length') || lower.includes('limit') || lower.includes('token'))) {
       return 'Conversation is too long. The context limit has been exceeded. Try starting a new conversation or ask me to reset the session.';

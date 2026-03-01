@@ -33,6 +33,8 @@ services:
       - AGENT_MAX_CONCURRENT_JOBS=${AGENT_MAX_CONCURRENT_JOBS:-8}
       # 3-tier delegation: Jonas(Sonnet) → Gandalf(Opus) → Lucy(Haiku)
       - AGENT_MAX_DELEGATION_DEPTH=${AGENT_MAX_DELEGATION_DEPTH:-3}
+      # Claude CLI turn limit — increase for complex long-running tasks
+      - CLAUDE_MAX_TURNS=${CLAUDE_MAX_TURNS:-30}
       # Richer context for Opus; acceptable overhead for Haiku
       - AGENT_MAX_TOOL_RESULT_CHARS=${AGENT_MAX_TOOL_RESULT_CHARS:-6000}
       - AGENT_MAX_HISTORY_MSG_CHARS=${AGENT_MAX_HISTORY_MSG_CHARS:-1500}
