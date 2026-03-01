@@ -26,6 +26,8 @@ export class BackgroundJobManager {
   private jobs: BackgroundJob[] = [];
   private activeCount = 0;
   private queue: BackgroundJob[] = [];
+  // In-memory overrides for jobs that target a specific agent (not persisted)
+  private jobOverrides = new Map<string, { agent: AgentCore; depth: number }>();
   // Serializes concurrent persist() calls to prevent .tmp rename races
   private persistChain: Promise<void> = Promise.resolve();
 
@@ -62,6 +64,10 @@ export class BackgroundJobManager {
     targetChannel?: { type: string; id: string };
     scheduledTaskId?: string;
     timeoutMs?: number;
+    /** Optional agent to run this job on instead of the default agent. */
+    agent?: AgentCore;
+    /** Delegation depth to pass through to agent.chat(). */
+    depth?: number;
   }): Promise<BackgroundJob> {
     const job: BackgroundJob = {
       id: createId('job'),
@@ -74,6 +80,10 @@ export class BackgroundJobManager {
       scheduledTaskId: input.scheduledTaskId,
       timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     };
+
+    if (input.agent) {
+      this.jobOverrides.set(job.id, { agent: input.agent, depth: input.depth ?? 0 });
+    }
 
     this.jobs.push(job);
     await this.persist();
@@ -111,6 +121,7 @@ export class BackgroundJobManager {
 
     job.status = 'cancelled';
     job.completedAt = isoNow();
+    this.jobOverrides.delete(id);
     await this.persist();
 
     this.auditLog('job.cancelled', job);
@@ -158,17 +169,23 @@ export class BackgroundJobManager {
     const timeoutMs = job.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     let timeoutHandle: NodeJS.Timeout | undefined;
     const startMs = Date.now();
+    const override = this.jobOverrides.get(job.id);
+    const jobAgent = override?.agent ?? this.agent;
+    const jobDepth = override?.depth ?? 0;
 
     try {
       const result = await Promise.race([
-        this.agent.chat(
+        jobAgent.chat(
           job.prompt,
           { type: 'job', id: job.id },
           job.sessionKey,
+          undefined,
+          undefined,
+          jobDepth,
         ),
         new Promise<never>((_, reject) => {
           timeoutHandle = setTimeout(() => {
-            this.agent.abort(job.sessionKey);
+            jobAgent.abort(job.sessionKey);
             reject(new Error(`Job timed out after ${timeoutMs}ms`));
           }, timeoutMs);
         }),
@@ -211,6 +228,7 @@ export class BackgroundJobManager {
       }
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      this.jobOverrides.delete(job.id);
       this.activeCount--;
       this.onJobDone();
     }
