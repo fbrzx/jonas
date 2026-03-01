@@ -41,6 +41,10 @@ services:
       - AGENT_JOB_HISTORY_SIZE=${AGENT_JOB_HISTORY_SIZE:-200}
     volumes:
       - ./.volumes/agent-data:/data
+      # Host repo mount — allows self-update skill to run git pull on the host repo
+      - /home/fbrz/jonas:/host/jonas
+      # Docker socket mount — allows self-update skill to run make rebuild (docker compose)
+      - /var/run/docker.sock:/var/run/docker.sock
       # Optional: mount host Claude Code skills dir for bidirectional sync
       # Uncomment and set CLAUDE_SKILLS_PATH=/claude-skills in your .env to enable
       # - ${HOME}/.claude/skills:/claude-skills:rw
