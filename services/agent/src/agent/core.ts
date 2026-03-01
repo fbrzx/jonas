@@ -23,6 +23,9 @@ const MAX_TOOL_TURNS = Number(process.env.AGENT_TOOL_MAX_TURNS ?? 4);
 const OLLAMA_TOOLS_ENABLED = String(process.env.AGENT_OLLAMA_TOOLS_ENABLED ?? 'false').toLowerCase() === 'true';
 const OLLAMA_GROUNDING_MODE = String(process.env.AGENT_OLLAMA_GROUNDING_MODE ?? 'warn').toLowerCase();
 const DELEGATION_TIMEOUT_MS = Number(process.env.AGENT_DELEGATION_TIMEOUT_MS ?? 120000);
+const MAX_TOOL_RESULT_CHARS = Number(process.env.AGENT_MAX_TOOL_RESULT_CHARS ?? 4000);
+const MAX_HISTORY_MSG_CHARS = Number(process.env.AGENT_MAX_HISTORY_MSG_CHARS ?? 1000);
+const MAX_DELEGATION_DEPTH = Number(process.env.AGENT_MAX_DELEGATION_DEPTH ?? 2);
 
 /**
  * Minimal interface exposed to AgentCore for agent delegation.
@@ -153,8 +156,10 @@ export class AgentCore {
     channel: Channel,
     sessionKey?: string,
     onDelta?: (text: string) => void,
-    onToolUse?: (name: string, input: Record<string, unknown>) => void
+    onToolUse?: (name: string, input: Record<string, unknown>) => void,
+    depth?: number,
   ): Promise<string> {
+    const currentDepth = depth ?? 0;
     const key = sessionKey ?? `${channel.type}:${channel.id}`;
     const session = this.sessions.getOrCreate(key);
 
@@ -271,7 +276,7 @@ export class AgentCore {
 
           onToolUse?.(call.name, call.input);
           const toolResult = await this.withTimeout(
-            this.executeTool(call.name, call.input, channel),
+            this.executeTool(call.name, call.input, channel, currentDepth),
             TOOL_TIMEOUT_MS,
             `Tool ${call.name} timed out after ${TOOL_TIMEOUT_MS}ms`,
           );
@@ -295,10 +300,14 @@ export class AgentCore {
           executedToolNames.add(call.name);
           this.collectGroundedVaultPaths(call.name, toolResult, groundedVaultPaths);
           this.collectGroundedIds(call.name, toolResult, groundedJobIds, groundedMemoryIds);
+          const serialized = JSON.stringify(toolResult);
+          const truncatedResult = serialized.length > MAX_TOOL_RESULT_CHARS
+            ? serialized.slice(0, MAX_TOOL_RESULT_CHARS) + '… [truncated]'
+            : serialized;
           providerMessages.push({
             role: 'tool',
             name: call.name,
-            content: JSON.stringify(toolResult),
+            content: truncatedResult,
           });
         }
 
@@ -423,9 +432,12 @@ export class AgentCore {
     const history = messages.slice(-11, -1);
     if (history.length === 0) return currentMessage;
 
-    const lines = history.map((m) =>
-      m.role === 'user' ? `User: ${m.content}` : `Assistant: ${m.content}`
-    );
+    const lines = history.map((m) => {
+      const content = m.content.length > MAX_HISTORY_MSG_CHARS
+        ? m.content.slice(0, MAX_HISTORY_MSG_CHARS) + '… [truncated]'
+        : m.content;
+      return m.role === 'user' ? `User: ${content}` : `Assistant: ${content}`;
+    });
     lines.push(`User: ${currentMessage}`);
 
     return `<conversation_history>\n${lines.join('\n\n')}\n</conversation_history>\n\nRespond to the latest User message above. Use the conversation history for context.`;
@@ -639,7 +651,7 @@ export class AgentCore {
     return tools;
   }
 
-  private async executeTool(name: string, input: Record<string, unknown>, channel?: Channel): Promise<Record<string, unknown>> {
+  private async executeTool(name: string, input: Record<string, unknown>, channel?: Channel, depth?: number): Promise<Record<string, unknown>> {
     switch (name) {
       case 'memory_remember': {
         if (!this.memory || !this.embeddings) {
@@ -960,19 +972,31 @@ export class AgentCore {
           return { error: `Agent not found: ${agentName}` };
         }
 
+        const currentDepth = depth ?? 0;
+        if (currentDepth >= MAX_DELEGATION_DEPTH) {
+          return { error: `Delegation depth limit (${MAX_DELEGATION_DEPTH}) exceeded. Cannot delegate further.` };
+        }
+
         const callId = createId('delegate');
         const delegateChannel: Channel = { type: 'api', id: 'delegation' };
         const sessionKey = `delegate:${callId}`;
 
+        let delegateTimer: NodeJS.Timeout | undefined;
         try {
-          const result = await this.withTimeout(
-            target.chat(task, delegateChannel, sessionKey),
-            DELEGATION_TIMEOUT_MS,
-            `Delegation to agent "${agentName}" timed out after ${DELEGATION_TIMEOUT_MS}ms`,
-          );
+          const result = await Promise.race([
+            target.chat(task, delegateChannel, sessionKey, undefined, undefined, (depth ?? 0) + 1),
+            new Promise<never>((_, reject) => {
+              delegateTimer = setTimeout(() => {
+                target.abort(sessionKey);
+                reject(new Error(`Delegation to agent "${agentName}" timed out after ${DELEGATION_TIMEOUT_MS}ms`));
+              }, DELEGATION_TIMEOUT_MS);
+            }),
+          ]);
           return { agentName, result };
         } catch (err: unknown) {
           return { error: err instanceof Error ? err.message : String(err) };
+        } finally {
+          if (delegateTimer) clearTimeout(delegateTimer);
         }
       }
 

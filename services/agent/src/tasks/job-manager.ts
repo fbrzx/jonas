@@ -168,6 +168,7 @@ export class BackgroundJobManager {
         ),
         new Promise<never>((_, reject) => {
           timeoutHandle = setTimeout(() => {
+            this.agent.abort(job.sessionKey);
             reject(new Error(`Job timed out after ${timeoutMs}ms`));
           }, timeoutMs);
         }),
