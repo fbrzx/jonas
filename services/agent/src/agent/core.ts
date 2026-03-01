@@ -635,7 +635,7 @@ export class AgentCore {
         {
           name: 'delegate_to_agent',
           description:
-            'Delegate a task or question to a specialized agent by name. The agent will process the task and return its response. Use agent_list first to discover available agents.',
+            'Delegate a task to a specialized agent by name. The task runs as a background job (up to 10 minutes) and results are delivered to the current channel when complete. Use agent_list first to discover available agents.',
           parameters: {
             type: 'object',
             properties: {
@@ -977,6 +977,32 @@ export class AgentCore {
           return { error: `Delegation depth limit (${MAX_DELEGATION_DEPTH}) exceeded. Cannot delegate further.` };
         }
 
+        // Route through job system for longer timeout (10min vs 120s)
+        if (this.jobManager) {
+          let targetChannel: { type: string; id: string } | undefined;
+          if (channel) {
+            targetChannel = {
+              type: channel.type.replace(/^channel:/, ''),
+              id: channel.id,
+            };
+          }
+
+          const job = await this.jobManager.spawn({
+            name: `delegate:${agentName}`,
+            prompt: task,
+            targetChannel,
+            agent: target,
+            depth: currentDepth + 1,
+          });
+
+          return {
+            agentName,
+            jobId: job.id,
+            message: `Delegated to agent "${agentName}" as background job (ID: ${job.id}). The task will run with up to 10 minutes and results will be delivered when complete.`,
+          };
+        }
+
+        // Fallback: synchronous delegation with abort propagation
         const callId = createId('delegate');
         const delegateChannel: Channel = { type: 'api', id: 'delegation' };
         const sessionKey = `delegate:${callId}`;
@@ -984,7 +1010,7 @@ export class AgentCore {
         let delegateTimer: NodeJS.Timeout | undefined;
         try {
           const result = await Promise.race([
-            target.chat(task, delegateChannel, sessionKey, undefined, undefined, (depth ?? 0) + 1),
+            target.chat(task, delegateChannel, sessionKey, undefined, undefined, currentDepth + 1),
             new Promise<never>((_, reject) => {
               delegateTimer = setTimeout(() => {
                 target.abort(sessionKey);
