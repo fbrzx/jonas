@@ -18,7 +18,7 @@ const ICONS: Record<string, string> = {
   channels: `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="8" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="12" cy="12" r="2"/><path d="M6 7.5L10 5M6 8.5L10 11"/></svg>`,
   agents: `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="10" height="8" rx="2"/><path d="M6 5V4a2 2 0 014 0v1"/><circle cx="6.5" cy="9.5" r="1" fill="currentColor" stroke="none"/><circle cx="9.5" cy="9.5" r="1" fill="currentColor" stroke="none"/><path d="M6.5 11.5h3"/></svg>`,
   tasks: `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 8l2.5 2.5L11 6"/></svg>`,
-  audit: `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1l2 4h4l-3.3 2.4 1.3 4L8 9l-3.5 2.4 1.3-4L2.5 5h4z"/></svg>`,
+  audit: `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 1H4a1 1 0 00-1 1v11c0 .6.6 1.2 1.5 1 .9-.2 1.5.4 1.5 1h4c0-.6.6-1.2 1.5-1 .9.2 1.5-.4 1.5-1V2a1 1 0 00-1-1z"/><path d="M5 5h6M5 7.5h6M5 10h4"/></svg>`,
 };
 
 const instanceInfo = process.env.DOMAIN || '';
