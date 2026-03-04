@@ -12,6 +12,7 @@ export interface Message {
   channel: Channel;
   conversationId: string;
   timestamp: string;
+  model?: string;
   metadata?: Record<string, unknown>;
 }
 

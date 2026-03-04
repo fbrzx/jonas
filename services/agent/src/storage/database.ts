@@ -19,6 +19,7 @@ export interface MessageRow {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  model?: string | null;
 }
 
 export interface AuditRow {
@@ -31,6 +32,8 @@ export interface AuditRow {
   channelId?: string;
   sessionKey?: string;
   jobId?: string;
+  agentId?: string;
+  agentName?: string;
   model?: string;
   tokensUsed?: number;
   durationMs?: number;
@@ -159,6 +162,31 @@ export class ConversationDatabase {
     } catch {
       // Index already exists
     }
+    // Add agent_id and agent_name columns to audit_log
+    try {
+      this.db.exec('ALTER TABLE audit_log ADD COLUMN agent_id TEXT');
+      log.info('Migration: added agent_id column to audit_log');
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec('ALTER TABLE audit_log ADD COLUMN agent_name TEXT');
+      log.info('Migration: added agent_name column to audit_log');
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_audit_agent ON audit_log(agent_id)');
+    } catch {
+      // Index already exists
+    }
+    // Add model column to messages
+    try {
+      this.db.exec('ALTER TABLE messages ADD COLUMN model TEXT');
+      log.info('Migration: added model column to messages');
+    } catch {
+      // Column already exists
+    }
   }
 
   // ── Agent CRUD ────────────────────────────────────────────────────────────
@@ -275,10 +303,10 @@ export class ConversationDatabase {
 
   saveMessage(msg: MessageRow): void {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO messages (id, conversation_id, role, content, timestamp)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO messages (id, conversation_id, role, content, timestamp, model)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(msg.id, msg.conversationId, msg.role, msg.content, msg.timestamp);
+    stmt.run(msg.id, msg.conversationId, msg.role, msg.content, msg.timestamp, msg.model ?? null);
   }
 
   getConversation(sessionKey: string): { conv: ConversationRow; messages: MessageRow[] } | null {
@@ -292,7 +320,7 @@ export class ConversationDatabase {
     if (!conv) return null;
 
     const messages = this.db.prepare(`
-      SELECT id, conversation_id as conversationId, role, content, timestamp
+      SELECT id, conversation_id as conversationId, role, content, timestamp, model
       FROM messages
       WHERE conversation_id = ?
       ORDER BY timestamp ASC
@@ -313,7 +341,7 @@ export class ConversationDatabase {
 
   getConversationMessages(conversationId: string): MessageRow[] {
     return this.db.prepare(`
-      SELECT id, conversation_id as conversationId, role, content, timestamp
+      SELECT id, conversation_id as conversationId, role, content, timestamp, model
       FROM messages
       WHERE conversation_id = ?
       ORDER BY timestamp ASC
@@ -334,8 +362,8 @@ export class ConversationDatabase {
     const sanitizedDetails = this.sanitizeAuditDetails(entry.action, entry.details);
 
     const stmt = this.db.prepare(`
-      INSERT INTO audit_log (timestamp, action, log_type, details, channel_type, channel_id, session_key, model, tokens_used, duration_ms, job_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO audit_log (timestamp, action, log_type, details, channel_type, channel_id, session_key, agent_id, agent_name, model, tokens_used, duration_ms, job_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       entry.timestamp,
@@ -345,6 +373,8 @@ export class ConversationDatabase {
       entry.channelType ?? null,
       entry.channelId ?? null,
       entry.sessionKey ?? null,
+      entry.agentId ?? null,
+      entry.agentName ?? null,
       entry.model ?? null,
       entry.tokensUsed ?? null,
       entry.durationMs ?? null,
@@ -458,6 +488,7 @@ export class ConversationDatabase {
     let query = `
             SELECT id, timestamp, action, log_type as logType, details, channel_type as channelType,
               channel_id as channelId, session_key as sessionKey, job_id as jobId,
+              agent_id as agentId, agent_name as agentName,
               model, tokens_used as tokensUsed, duration_ms as durationMs, created_at as createdAt
             FROM audit_log
             WHERE 1=1

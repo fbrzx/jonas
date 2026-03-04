@@ -88,6 +88,8 @@ export class AgentRegistry {
       provider,
       mcpConfigPath: this.mcpConfigPath,
       systemPromptOverride: row.systemPromptOverride,
+      agentId: row.id,
+      agentName: row.name,
     } satisfies AgentCoreOptions);
     core.setAgentRegistry(this as unknown as AgentDelegateRegistry);
     return core;

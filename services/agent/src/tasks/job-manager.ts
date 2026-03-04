@@ -88,7 +88,12 @@ export class BackgroundJobManager {
     this.jobs.push(job);
     await this.persist();
 
-    this.auditLog('job.queued', job);
+    const queuedAgent = input.agent ?? this.agent;
+    this.auditLog('job.queued', job, {
+      agentId: queuedAgent.getAgentId(),
+      agentName: queuedAgent.getAgentName(),
+      model: queuedAgent.getProviderName(),
+    });
     log.debug({ id: job.id, name: job.name, activeCount: this.activeCount }, 'Job queued');
 
     if (this.activeCount < MAX_CONCURRENT_JOBS) {
@@ -121,10 +126,16 @@ export class BackgroundJobManager {
 
     job.status = 'cancelled';
     job.completedAt = isoNow();
+    const cancelOverride = this.jobOverrides.get(id);
+    const cancelAgent = cancelOverride?.agent ?? this.agent;
     this.jobOverrides.delete(id);
     await this.persist();
 
-    this.auditLog('job.cancelled', job);
+    this.auditLog('job.cancelled', job, {
+      agentId: cancelAgent.getAgentId(),
+      agentName: cancelAgent.getAgentName(),
+      model: cancelAgent.getProviderName(),
+    });
     log.debug({ id }, 'Job cancelled');
     return true;
   }
@@ -163,15 +174,19 @@ export class BackgroundJobManager {
     job.startedAt = isoNow();
     await this.persist();
 
-    this.auditLog('job.started', job);
+    const override = this.jobOverrides.get(job.id);
+    const jobAgent = override?.agent ?? this.agent;
+    const jobDepth = override?.depth ?? 0;
+    const jobAgentId = jobAgent.getAgentId();
+    const jobAgentName = jobAgent.getAgentName();
+    const jobModel = jobAgent.getProviderName();
+
+    this.auditLog('job.started', job, { agentId: jobAgentId, agentName: jobAgentName, model: jobModel });
     log.info({ id: job.id, name: job.name, activeCount: this.activeCount, prompt: job.prompt.slice(0, 80) }, 'Sub-agent job starting');
 
     const timeoutMs = job.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     let timeoutHandle: NodeJS.Timeout | undefined;
     const startMs = Date.now();
-    const override = this.jobOverrides.get(job.id);
-    const jobAgent = override?.agent ?? this.agent;
-    const jobDepth = override?.depth ?? 0;
 
     try {
       const result = await Promise.race([
@@ -196,7 +211,7 @@ export class BackgroundJobManager {
       job.completedAt = isoNow();
       await this.persist();
 
-      this.auditLog('job.completed', job, { durationMs: Date.now() - startMs });
+      this.auditLog('job.completed', job, { durationMs: Date.now() - startMs, agentId: jobAgentId, agentName: jobAgentName, model: jobModel });
       log.info({ id: job.id, resultLen: result.length }, 'Sub-agent job completed');
 
       if (job.targetChannel) {
@@ -216,7 +231,7 @@ export class BackgroundJobManager {
         job.completedAt = isoNow();
         await this.persist();
 
-        this.auditLog('job.failed', job, { durationMs: Date.now() - startMs, error: job.error });
+        this.auditLog('job.failed', job, { durationMs: Date.now() - startMs, error: job.error, agentId: jobAgentId, agentName: jobAgentName, model: jobModel });
         log.error({ err, id: job.id }, 'Sub-agent job failed');
 
         if (job.targetChannel) {
@@ -271,7 +286,7 @@ export class BackgroundJobManager {
   private auditLog(
     action: string,
     job: BackgroundJob,
-    extra: { durationMs?: number; error?: string; reason?: string } = {},
+    extra: { durationMs?: number; error?: string; reason?: string; agentId?: string; agentName?: string; model?: string } = {},
   ): void {
     if (!this.database) return;
     try {
@@ -291,6 +306,9 @@ export class BackgroundJobManager {
         channelId: job.targetChannel?.id ?? job.id,
         sessionKey: job.sessionKey,
         jobId: job.id,
+        agentId: extra.agentId,
+        agentName: extra.agentName,
+        model: extra.model,
         durationMs: extra.durationMs,
       });
     } catch (err) {

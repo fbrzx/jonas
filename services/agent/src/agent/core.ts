@@ -48,6 +48,8 @@ export interface AgentCoreOptions {
   jobManager?: BackgroundJobManager;
   agentRegistry?: AgentDelegateRegistry;
   systemPromptOverride?: string | null;
+  agentId?: string;
+  agentName?: string;
 }
 
 export class AgentCore {
@@ -66,6 +68,8 @@ export class AgentCore {
   private startedAt = Date.now();
   private abortControllers = new Map<string, AbortController>();
   private systemPromptOverride: string | null = null;
+  private agentId: string;
+  private agentName: string;
 
   constructor(opts: AgentCoreOptions) {
     this.retriever = opts.retriever;
@@ -79,6 +83,8 @@ export class AgentCore {
     this.jobManager = opts.jobManager;
     this.agentRegistry = opts.agentRegistry;
     this.systemPromptOverride = opts.systemPromptOverride ?? null;
+    this.agentId = opts.agentId ?? 'unknown';
+    this.agentName = opts.agentName ?? 'unknown';
   }
 
   /** Allow late injection of job manager (avoids circular dependency) */
@@ -110,6 +116,14 @@ export class AgentCore {
 
   getProviderName(): string {
     return this.provider.getName();
+  }
+
+  getAgentId(): string {
+    return this.agentId;
+  }
+
+  getAgentName(): string {
+    return this.agentName;
   }
 
   private recordAuditEvent(params: {
@@ -146,6 +160,8 @@ export class AgentCore {
       channelType: params.channel.type,
       channelId: params.channel.id,
       sessionKey: params.sessionKey,
+      agentId: this.agentId,
+      agentName: this.agentName,
       model: params.model,
       durationMs: params.durationMs,
     });
@@ -281,7 +297,11 @@ export class AgentCore {
             `Tool ${call.name} timed out after ${TOOL_TIMEOUT_MS}ms`,
           );
 
-          const action = call.name.startsWith('memory_') ? 'memory' : 'tool_use';
+          const isDelegation = call.name === 'delegate_to_agent';
+          const action = isDelegation ? 'delegation' : call.name.startsWith('memory_') ? 'memory' : 'tool_use';
+          const delegationDetails = isDelegation && typeof toolResult.agentName === 'string'
+            ? { delegatedTo: toolResult.agentName, delegatedJobId: toolResult.jobId }
+            : {};
           this.recordAuditEvent({
             action,
             channel,
@@ -289,12 +309,16 @@ export class AgentCore {
             conversationId: session.id,
             logType: typeof toolResult.error === 'string' ? 'error' : 'info',
             details: {
-              description: `Executed ${action === 'memory' ? 'memory' : 'tool'}: ${call.name}`,
+              description: isDelegation
+                ? (typeof toolResult.agentName === 'string' ? `Delegated task to agent "${toolResult.agentName}"` : 'Delegation failed')
+                : `Executed ${action === 'memory' ? 'memory' : 'tool'}: ${call.name}`,
               tool: call.name,
               inputKeys: Object.keys(call.input ?? {}),
               success: typeof toolResult.error !== 'string',
+              ...delegationDetails,
               ...(typeof toolResult.error === 'string' ? { error: toolResult.error } : {}),
             },
+            model: this.provider.getName(),
           });
 
           executedToolNames.add(call.name);
@@ -362,6 +386,7 @@ export class AgentCore {
       channel,
       conversationId: session.id,
       timestamp: isoNow(),
+      model: this.provider.getName(),
     };
     session.messages.push(assistantMsg);
 
@@ -390,6 +415,7 @@ export class AgentCore {
           role: assistantMsg.role,
           content: assistantMsg.content,
           timestamp: assistantMsg.timestamp,
+          model: this.provider.getName(),
         });
       } catch (err) {
         log.warn(err, 'Failed to save conversation to database');
