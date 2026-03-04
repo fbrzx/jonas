@@ -7,7 +7,13 @@ import type { AgentCore } from '../../agent/core.js';
 import type { BackgroundJob } from '@jonas/shared/types';
 
 function mockAgent(reply = 'done'): AgentCore {
-  return { chat: vi.fn().mockResolvedValue(reply) } as unknown as AgentCore;
+  return {
+    chat: vi.fn().mockResolvedValue(reply),
+    getAgentId: vi.fn().mockReturnValue('test-agent-id'),
+    getAgentName: vi.fn().mockReturnValue('test-agent'),
+    getProviderName: vi.fn().mockReturnValue('claude:test'),
+    abort: vi.fn(),
+  } as unknown as AgentCore;
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
@@ -72,7 +78,7 @@ describe('BackgroundJobManager', () => {
   });
 
   it('spawn() marks job failed and dispatches error on agent error', async () => {
-    const failingAgent = { chat: vi.fn().mockRejectedValue(new Error('boom')) } as unknown as AgentCore;
+    const failingAgent = { chat: vi.fn().mockRejectedValue(new Error('boom')), getAgentId: vi.fn().mockReturnValue('x'), getAgentName: vi.fn().mockReturnValue('x'), getProviderName: vi.fn().mockReturnValue('x'), abort: vi.fn() } as unknown as AgentCore;
     const dispatch = vi.fn().mockResolvedValue(undefined);
     const mgr = new BackgroundJobManager({ agent: failingAgent, dispatchOutput: dispatch, storagePath });
     await mgr.start();
@@ -89,7 +95,7 @@ describe('BackgroundJobManager', () => {
     // Using mockReturnValue (not mockResolvedValue) so all calls share the exact same Promise.
     let releaseAll!: () => void;
     const latch = new Promise<string>((resolve) => { releaseAll = () => resolve('done'); });
-    const blockingAgent = { chat: vi.fn().mockReturnValue(latch) } as unknown as AgentCore;
+    const blockingAgent = { chat: vi.fn().mockReturnValue(latch), getAgentId: vi.fn().mockReturnValue('x'), getAgentName: vi.fn().mockReturnValue('x'), getProviderName: vi.fn().mockReturnValue('x'), abort: vi.fn() } as unknown as AgentCore;
 
     const mgr = new BackgroundJobManager({ agent: blockingAgent, dispatchOutput: vi.fn(), storagePath });
     await mgr.start();
