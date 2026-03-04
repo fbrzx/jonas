@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { dirname, extname, join, resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -144,7 +144,8 @@ globalThis.fetch = (
 };
 
 function authCookieValue(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
+  const secret = process.env.DASHBOARD_COOKIE_SECRET ?? 'jonas-dashboard-default-secret';
+  return createHmac('sha256', secret).update(token).digest('hex');
 }
 
 function hasAuthCookie(cookieHeader: string | undefined, expectedToken: string): boolean {

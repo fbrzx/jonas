@@ -7,16 +7,16 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { readFile, writeFile, readdir, mkdir } from 'node:fs/promises';
-import { join, dirname, relative } from 'node:path';
+import { join, dirname, relative, resolve } from 'node:path';
 import { MemoryClient } from './memory/client.js';
 import { EmbeddingClient } from './memory/embeddings.js';
 import type { MemoryCategory } from '@jonas/shared/types';
 
 const VAULT_PATH = process.env.VAULT_PATH ?? '/data/vault';
 
-function safePath(path: string): string {
-  const resolved = join(VAULT_PATH, path);
-  if (!resolved.startsWith(VAULT_PATH)) {
+function safePath(requestedPath: string): string {
+  const resolved = resolve(join(VAULT_PATH, requestedPath));
+  if (!resolved.startsWith(resolve(VAULT_PATH))) {
     throw new Error('Path traversal blocked');
   }
   return resolved;

@@ -64,7 +64,6 @@ export class AgentCore {
   private database?: ConversationDatabase;
   private jobManager?: BackgroundJobManager;
   private agentRegistry?: AgentDelegateRegistry;
-  private auditLog: AuditEntry[] = []; // Keep last 100 in memory for quick access
   private startedAt = Date.now();
   private abortControllers = new Map<string, AbortController>();
   private systemPromptOverride: string | null = null;
@@ -107,7 +106,7 @@ export class AgentCore {
   }
 
   get audit(): AuditEntry[] {
-    return this.auditLog;
+    return [];
   }
 
   get activeConversationCount(): number {
@@ -144,11 +143,6 @@ export class AgentCore {
       channel: params.channel.type,
       conversationId: params.conversationId,
     };
-
-    this.auditLog.push(entry);
-    if (this.auditLog.length > 100) {
-      this.auditLog.shift();
-    }
 
     if (!this.database) return;
 
@@ -1254,16 +1248,7 @@ export class AgentCore {
   }
 
   private renderErrorMessage({ userMessage, technical }: { userMessage: string; technical: string }): string {
-    // Use HTML for red border if supported by chat UI, otherwise fallback to Markdown blockquote with emoji
-    return `
-<div style="border:2px solid #e53935;padding:1em;border-radius:8px;background:#fff5f5;color:#b71c1c;margin:1em 0;">
-  <strong>⚠️ ${userMessage}</strong>
-  <details style="margin-top:0.5em;">
-    <summary style="cursor:pointer;">Technical details</summary>
-    <pre style="white-space:pre-wrap;font-size:0.95em;color:#333;background:#fbe9e7;padding:0.5em 1em;border-radius:4px;">${technical}</pre>
-  </details>
-</div>
-`;
+    return `**${userMessage}**\n\n<details>\n<summary>Technical details</summary>\n\n\`\`\`\n${technical}\n\`\`\`\n</details>`;
   }
 
   private async applyOllamaGrounding(

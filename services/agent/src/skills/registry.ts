@@ -126,14 +126,18 @@ export class SkillRegistry {
     const hasTools = await fileExists(join(skillDir, 'tools', 'server.py'));
     const hasPrompt = body.length > 0;
 
-    // Install Python deps if needed
+    // Install Python deps in per-skill venv
     const reqPath = join(skillDir, 'requirements.txt');
+    const venvPath = join(skillDir, '.venv');
     if (hasTools && (await fileExists(reqPath))) {
       try {
-        await execFileAsync('pip3', [
-          'install', '--break-system-packages', '-q', '-r', reqPath,
+        if (!(await fileExists(join(venvPath, 'bin', 'pip')))) {
+          await execFileAsync('python3', ['-m', 'venv', venvPath]);
+        }
+        await execFileAsync(join(venvPath, 'bin', 'pip'), [
+          'install', '-q', '-r', reqPath,
         ]);
-        log.info({ skill: dirName }, 'Python dependencies installed');
+        log.info({ skill: dirName }, 'Python dependencies installed in venv');
       } catch (err) {
         log.warn({ skill: dirName, err }, 'Failed to install Python dependencies');
       }
@@ -317,8 +321,9 @@ export class SkillRegistry {
     for (const [name, skill] of this.skills) {
       if (skill.status !== 'enabled' || !skill.hasTools) continue;
       const env = await this.cryptoStore.getEnv(skill.filePath);
+      const venvPython = join(skill.filePath, '.venv', 'bin', 'python3');
       servers[`skill-${name}`] = {
-        command: 'python3',
+        command: await fileExists(venvPython) ? venvPython : 'python3',
         args: [join(skill.filePath, 'tools', 'server.py')],
         cwd: skill.filePath,
         env,

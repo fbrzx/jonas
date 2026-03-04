@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
-import { createHash } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 
 const app = new Hono();
 const jonasIconUrl = process.env.DASHBOARD_ICON_URL || '/assets/avatar.png';
 
 function authCookieValue(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
+  const secret = process.env.DASHBOARD_COOKIE_SECRET ?? 'jonas-dashboard-default-secret';
+  return createHmac('sha256', secret).update(token).digest('hex');
 }
 
 function renderLoginPage(error = ''): string {

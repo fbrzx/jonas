@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { randomInt } from 'node:crypto';
 import { createLogger } from '@jonas/shared/utils';
 
 const log = createLogger('channel-pairing');
@@ -73,7 +74,7 @@ export class ChannelPairingService {
 
   async init(channelType: string, ttlMinutes = 10): Promise<{ channelType: string; code: string; expiresAt: string }> {
     const now = Date.now();
-    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const code = String(randomInt(100000, 1000000));
     const expiresAt = new Date(now + ttlMinutes * 60_000).toISOString();
 
     const current = this.state.channels[channelType] ?? { paired: false };

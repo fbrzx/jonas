@@ -43,10 +43,6 @@ services:
       - AGENT_JOB_HISTORY_SIZE=${AGENT_JOB_HISTORY_SIZE:-200}
     volumes:
       - ./.volumes/agent-data:/data
-      # Host repo mount — allows self-update skill to run git pull on the host repo
-      - /home/fbrz/jonas:/host/jonas
-      # Docker socket mount — allows self-update skill to run make rebuild (docker compose)
-      - /var/run/docker.sock:/var/run/docker.sock
       # Optional: mount host Claude Code skills dir for bidirectional sync
       # Uncomment and set CLAUDE_SKILLS_PATH=/claude-skills in your .env to enable
       # - ${HOME}/.claude/skills:/claude-skills:rw
@@ -76,6 +72,11 @@ services:
     networks:
       - internal
       - public
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const h=require('http');h.get('http://localhost:18789/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     depends_on:
       - agent
 
@@ -93,6 +94,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - DOMAIN=${DOMAIN:-localhost}
       - DASHBOARD_COOKIE_SECURE=${DASHBOARD_COOKIE_SECURE:-false}
+      - DASHBOARD_COOKIE_SECRET=${DASHBOARD_COOKIE_SECRET:-}
     ports:
       - "127.0.0.1:3000:3000"
     networks:
@@ -102,7 +104,7 @@ services:
       - agent
 
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.13.2
     restart: unless-stopped
     environment:
       QDRANT__TELEMETRY_DISABLED: "true"
