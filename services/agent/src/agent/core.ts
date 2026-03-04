@@ -393,6 +393,7 @@ export class AgentCore {
           sessionKey: key,
           channelType: channel.type,
           channelId: channel.id,
+          agentId: this.agentId,
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
         });

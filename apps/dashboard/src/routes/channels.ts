@@ -7,6 +7,25 @@ const app = new Hono();
 const AGENT_URL = () => process.env.AGENT_API_URL ?? 'http://localhost:3001';
 const OAUTH_REDIRECT_URI = `${(process.env.OAUTH_REDIRECT_DOMAIN ?? 'http://localhost:3000').replace(/\/$/, '')}/oauth/callback`;
 
+interface AgentListItem {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  enabled: boolean;
+  provider: string;
+}
+
+async function fetchAgents(): Promise<AgentListItem[]> {
+  try {
+    const res = await fetch(`${AGENT_URL()}/api/agents`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { agents: AgentListItem[] };
+    return data.agents.filter((a) => a.enabled);
+  } catch {
+    return [];
+  }
+}
+
 interface PairingStatus {
   required: boolean;
   paired: boolean;
@@ -253,7 +272,36 @@ function renderChannelRequirements(channel: PlatformChannel): string {
     </div>`;
 }
 
-function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | null, pairingMessage?: string): string {
+function renderAgentAssignment(channel: PlatformChannel, agents: AgentListItem[]): string {
+  const id = encodeURIComponent(channel.dirName);
+  const currentAgentId = (channel.config as Record<string, unknown> | undefined)?.agentId as string | undefined;
+
+  const options = agents.map((a) => {
+    const selected = a.id === currentAgentId ? 'selected' : '';
+    const label = a.isDefault ? `${a.name} (default)` : a.name;
+    return `<option value="${a.id}" ${selected}>${label}</option>`;
+  }).join('');
+
+  const defaultSelected = !currentAgentId ? 'selected' : '';
+
+  return `
+    <h2>Agent</h2>
+    <p class="meta" style="margin-bottom:0.5rem">Which agent handles messages from this channel.</p>
+    <div style="display:flex;gap:0.5rem;align-items:center">
+      <select name="agentId" id="agent-select-${id}"
+              hx-post="/channels/${id}/agent"
+              hx-include="this"
+              hx-target="#agent-assign-result"
+              hx-swap="innerHTML"
+              style="max-width:300px">
+        <option value="" ${defaultSelected}>Default agent</option>
+        ${options}
+      </select>
+      <span id="agent-assign-result"></span>
+    </div>`;
+}
+
+function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | null, agents: AgentListItem[], pairingMessage?: string): string {
   const id = encodeURIComponent(channel.dirName);
   const requirementsHtml = renderChannelRequirements(channel);
   const requirementsSection = requirementsHtml ? `
@@ -321,6 +369,10 @@ function renderChannelDetail(channel: PlatformChannel, pairing: PairingStatus | 
         </button>
       </div>
       <div id="status-indicator"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      ${renderAgentAssignment(channel, agents)}
     </div>
 
     <div class="card" id="config-section">
@@ -393,15 +445,16 @@ app.get('/channels/:name', async (c) => {
   const name = c.req.param('name');
   const pairingMessage = c.req.query('pairingMessage') ?? '';
   try {
-    const [channel, pairing] = await Promise.all([
+    const [channel, pairing, agents] = await Promise.all([
       fetchChannel(name),
       fetchPairingStatus(name),
+      fetchAgents(),
     ]);
 
     if (!channel) {
       return c.html(layout('Channel Not Found', '<h1>Channel Not Found</h1><p><a href="/channels">&larr; Back to Channels</a></p>'));
     }
-    return c.html(layout(channel.metadata.name, renderChannelDetail(channel, pairing, pairingMessage)));
+    return c.html(layout(channel.metadata.name, renderChannelDetail(channel, pairing, agents, pairingMessage)));
   } catch {
     return c.html(
       layout('Error', '<h1>Error</h1><p class="badge badge--red">Agent unreachable</p>'),
@@ -509,6 +562,27 @@ app.put('/channels/:name/config', async (c) => {
     return c.html('<p class="badge badge--green">Config saved. Reload to see changes.</p>');
   } catch {
     return c.html('<p class="badge badge--red">Agent unreachable</p>');
+  }
+});
+
+app.post('/channels/:name/agent', async (c) => {
+  const name = c.req.param('name');
+  try {
+    const body = await c.req.parseBody();
+    const agentId = (body.agentId as string) || undefined;
+
+    const res = await fetch(`${AGENT_URL()}/api/channels/${encodeURIComponent(name)}/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: agentId ?? null }),
+    });
+
+    if (!res.ok) {
+      return c.html('<span class="badge badge--red">Failed to save</span>');
+    }
+    return c.html('<span class="badge badge--green">Saved</span>');
+  } catch {
+    return c.html('<span class="badge badge--red">Agent unreachable</span>');
   }
 });
 

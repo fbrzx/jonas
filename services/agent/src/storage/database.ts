@@ -9,6 +9,7 @@ export interface ConversationRow {
   sessionKey: string;
   channelType: string;
   channelId: string;
+  agentId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -295,10 +296,10 @@ export class ConversationDatabase {
 
   saveConversation(conv: ConversationRow): void {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO conversations (id, session_key, channel_type, channel_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO conversations (id, session_key, channel_type, channel_id, agent_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(conv.id, conv.sessionKey, conv.channelType, conv.channelId, conv.createdAt, conv.updatedAt);
+    stmt.run(conv.id, conv.sessionKey, conv.channelType, conv.channelId, conv.agentId ?? null, conv.createdAt, conv.updatedAt);
   }
 
   saveMessage(msg: MessageRow): void {
