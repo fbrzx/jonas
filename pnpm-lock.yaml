@@ -22,7 +22,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^1.19.10
-        version: 1.19.10(hono@4.12.2)
+        version: 1.19.10(hono@4.12.18)
       '@jonas/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -30,8 +30,8 @@ importers:
         specifier: ^0.5.16
         version: 0.5.16
       hono:
-        specifier: ^4.12.2
-        version: 4.12.2
+        specifier: ^4.12.16
+        version: 4.12.18
       pino:
         specifier: ^9.6.0
         version: 9.14.0
@@ -130,7 +130,7 @@ importers:
         version: 2.1.41
       '@hono/node-server':
         specifier: ^1.19.10
-        version: 1.19.10(hono@4.12.2)
+        version: 1.19.10(hono@4.12.18)
       '@jonas/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -150,8 +150,8 @@ importers:
         specifier: ^9.0.0
         version: 9.1.0
       hono:
-        specifier: ^4.12.2
-        version: 4.12.2
+        specifier: ^4.12.16
+        version: 4.12.18
       pino:
         specifier: ^9.6.0
         version: 9.14.0
@@ -187,8 +187,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       hono:
-        specifier: ^4.12.2
-        version: 4.12.2
+        specifier: ^4.12.16
+        version: 4.12.18
       pino:
         specifier: ^9.6.0
         version: 9.14.0
@@ -963,8 +963,8 @@ packages:
     resolution: {integrity: sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==}
     engines: {node: '>= 0.4'}
 
-  hono@4.12.2:
-    resolution: {integrity: sha512-gJnaDHXKDayjt8ue0n8Gs0A007yKXj4Xzb8+cNjZeYsSzzwKc0Lr+OZgYwVfB0pHfUs17EPoLvrOsEaJ9mj+Tg==}
+  hono@4.12.18:
+    resolution: {integrity: sha512-RWzP96k/yv0PQfyXnWjs6zot20TqfpfsNXhOnev8d1InAxubW93L11/oNUc3tQqn2G0bSdAOBpX+2uDFHV7kdQ==}
     engines: {node: '>=16.9.0'}
 
   http-errors@2.0.1:
@@ -1669,9 +1669,9 @@ snapshots:
   '@esbuild/win32-x64@0.27.3':
     optional: true
 
-  '@hono/node-server@1.19.10(hono@4.12.2)':
+  '@hono/node-server@1.19.10(hono@4.12.18)':
     dependencies:
-      hono: 4.12.2
+      hono: 4.12.18
 
   '@img/sharp-darwin-arm64@0.33.5':
     optionalDependencies:
@@ -1748,7 +1748,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.26.0(zod@3.25.76)':
     dependencies:
-      '@hono/node-server': 1.19.10(hono@4.12.2)
+      '@hono/node-server': 1.19.10(hono@4.12.18)
       ajv: 8.18.0
       ajv-formats: 3.0.1(ajv@8.18.0)
       content-type: 1.0.5
@@ -1758,7 +1758,7 @@ snapshots:
       eventsource-parser: 3.0.6
       express: 5.2.1
       express-rate-limit: 8.2.1(express@5.2.1)
-      hono: 4.12.2
+      hono: 4.12.18
       jose: 6.1.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -1770,7 +1770,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.26.0(zod@4.3.6)':
     dependencies:
-      '@hono/node-server': 1.19.10(hono@4.12.2)
+      '@hono/node-server': 1.19.10(hono@4.12.18)
       ajv: 8.18.0
       ajv-formats: 3.0.1(ajv@8.18.0)
       content-type: 1.0.5
@@ -1780,7 +1780,7 @@ snapshots:
       eventsource-parser: 3.0.6
       express: 5.2.1
       express-rate-limit: 8.2.1(express@5.2.1)
-      hono: 4.12.2
+      hono: 4.12.18
       jose: 6.1.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -2246,7 +2246,7 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
-  hono@4.12.2: {}
+  hono@4.12.18: {}
 
   http-errors@2.0.1:
     dependencies:
