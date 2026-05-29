@@ -13,7 +13,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "ws": "^8.18.0",
+    "ws": "^8.20.1",
     "@jonas/shared": "workspace:*"
   },
   "devDependencies": {
